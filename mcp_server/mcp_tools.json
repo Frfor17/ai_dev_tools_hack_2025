@@ -1,0 +1,41 @@
+[
+  {
+    "name": "get_market_data",
+    "description": "📊 Получение текущих рыночных данных по акции.",
+    "args": [
+      {"name": "symbol", "type": "string", "description": "Символ акции"},
+      {"name": "interval", "type": "string", "description": "Интервал данных"}
+    ]
+  },
+  {
+    "name": "get_stock_price",
+    "description": "💰 Получение текущей цены акции.",
+    "args": [
+      {"name": "symbol", "type": "string", "description": "Символ акции"}
+    ]
+  },
+  {
+    "name": "get_company_profile",
+    "description": "🏢 Получение профиля компании.",
+    "args": [
+      {"name": "symbol", "type": "string", "description": "Символ акции компании"}
+    ]
+  },
+  {
+    "name": "get_company_news",
+    "description": "📰 Получение последних новостей компании.",
+    "args": [
+      {"name": "symbol", "type": "string", "description": "Символ акции компании"},
+      {"name": "days", "type": "integer", "description": "Количество дней"},
+      {"name": "limit", "type": "integer", "description": "Максимальное количество новостей"}
+    ]
+  },
+  {
+    "name": "analyze_financial_metrics",
+    "description": "📊 Анализ финансовых показателей компании.",
+    "args": [
+      {"name": "symbol", "type": "string", "description": "Символ акции компании"},
+      {"name": "period", "type": "string", "description": "Период анализа"}
+    ]
+  }
+]

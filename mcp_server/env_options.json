@@ -1,0 +1,24 @@
+{
+  "rawEnvs": {
+    "PORT": {
+      "isRequired": false,
+      "description": "Порт MCP сервера",
+      "defaultValue": "8000"
+    },
+    "HOST": {
+      "isRequired": false,
+      "description": "Хост MCP сервера",
+      "defaultValue": "0.0.0.0"
+    }
+  },
+  "secretEnvs": {
+    "FINNHUB_API_KEY": {
+      "isRequired": true,
+      "description": "API ключ для Finnhub"
+    },
+    "ALPHA_VANTAGE_API_KEY": {
+      "isRequired": true,
+      "description": "API ключ для Alpha Vantage"
+    }
+  }
+}
