@@ -1,0 +1,22 @@
+# Файлы окружения - НИКОГДА НЕ КОММИТЬ!
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+.env.example
+# Другие вариации
+.env.*.local
+.env.*.example
+.env.*.sample
+
+# Файлы с секретами
+.secret
+.secrets
+.credentials
+.config
+
+# Системные переменные (Windows/Linux)
+.bash_profile
+.bashrc
+.zshrc
