@@ -1,48 +1,31 @@
-from fastmcp import FastMCP
-from cad_client import cad_client
-import asyncio
+"""MCP сервер для интеграции с CAD системами."""
 
-mcp = FastMCP("CAD Integration Server", dependencies=["httpx"])
+import os
+from typing import Dict, Any
+from dotenv import load_dotenv, find_dotenv
 
-@mcp.tool
-async def list_cad_documents() -> str:
-    """Получить список документов из CAD системы."""
-    return await cad_client.get_onshape_documents()
+load_dotenv(find_dotenv())
 
-@mcp.tool
-async def list_blender_objects() -> str:
-    """Получить список объектов из Blender."""
-    return await cad_client.get_blender_objects()
+from fastmcp import FastMCP, Context
+from mcp_instance import mcp
 
-@mcp.tool
-async def create_shape(shape_type: str = "cube", size: float = 1.0) -> str:
-    """
-    Создать простую фигуру в CAD.
+PORT = int(os.getenv("PORT", "8000"))
+
+from tools.list_cad_documents import list_cad_documents
+from tools.list_blender_objects import list_blender_objects
+from tools.create_shape import create_shape
+from tools.cad_systems_info import cad_systems_info
+
+def main():
+    """Запуск MCP сервера с HTTP транспортом."""
+    print("=" * 60)
+    print("🌐 ЗАПУСК MCP СЕРВЕРА CAD INTEGRATION")
+    print("=" * 60)
+    print(f"🚀 MCP Server: http://0.0.0.0:{PORT}/mcp")
+    print("=" * 60)
     
-    Args:
-        shape_type: Тип фигуры (cube, sphere, cylinder, cone)
-        size: Размер фигуры
-    """
-    return await cad_client.create_simple_shape(shape_type, size)
-
-@mcp.tool
-async def cad_systems_info() -> str:
-    """Получить информацию о доступных CAD системах."""
-    info = []
-    
-    if cad_client.onshape_key:
-        info.append("✅ Onshape: настроен")
-    else:
-        info.append("❌ Onshape: не настроен (добавьте ключи в .env)")
-        
-    if cad_client.blender_url:
-        info.append("✅ Blender API: настроен")
-    else:
-        info.append("❌ Blender API: не настроен")
-        
-    return "\n".join(info)
+    # Запускаем MCP сервер с streamable-http транспортом
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=PORT, stateless_http=True)
 
 if __name__ == "__main__":
-    print("CAD MCP Server запущен. Подключайте к VS Code.")
-    print("Проверьте настройки API в файле .env")
-    mcp.run()
+    main()
