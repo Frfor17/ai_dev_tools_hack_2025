@@ -1,6 +1,9 @@
+"""Клиент для работы с CAD системами."""
+
 import os
 import httpx
 from dotenv import load_dotenv
+from typing import Dict, Any, List
 
 load_dotenv()
 
@@ -15,68 +18,67 @@ class CADClient:
         self.blender_url = os.getenv("BLENDER_API_URL")
         self.blender_token = os.getenv("BLENDER_API_TOKEN")
         
-    async def get_onshape_documents(self):
+    async def get_onshape_documents(self) -> List[Dict[str, Any]]:
         """Получить список документов из Onshape."""
         if not all([self.onshape_url, self.onshape_key, self.onshape_secret]):
-            return "Ошибка: Не настроены ключи Onshape API в .env файле"
+            raise ValueError("Не настроены ключи Onshape API в .env файле")
             
         try:
-            async with httpx.AsyncClient() as client:
-                # Аутентификация для Onshape
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 headers = {
                     "Accept": "application/json",
                     "Authorization": f"Bearer {self.onshape_key}"
                 }
                 response = await client.get(
                     f"{self.onshape_url}/api/documents",
-                    headers=headers,
-                    timeout=30.0
+                    headers=headers
                 )
                 response.raise_for_status()
                 documents = response.json()
                 
-                # Упрощаем вывод
-                simplified = [
+                return [
                     {"name": doc.get("name"), "id": doc.get("id")}
-                    for doc in documents.get("items", [])[:5]  # Первые 5 документов
+                    for doc in documents.get("items", [])[:5]
                 ]
-                return f"Документы Onshape: {simplified}"
                 
         except Exception as e:
-            return f"Ошибка при запросе к Onshape API: {str(e)}"
+            raise RuntimeError(f"Ошибка при запросе к Onshape API: {str(e)}")
     
-    async def get_blender_objects(self):
+    async def get_blender_objects(self) -> List[Dict[str, Any]]:
         """Получить список объектов из Blender (если запущен API сервер)."""
         if not self.blender_url:
-            return "Ошибка: Не настроен URL Blender API"
+            raise ValueError("Не настроен URL Blender API")
             
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 headers = {}
                 if self.blender_token:
                     headers["Authorization"] = f"Bearer {self.blender_token}"
                     
                 response = await client.get(
                     f"{self.blender_url}/api/objects",
-                    headers=headers,
-                    timeout=10.0
+                    headers=headers
                 )
                 response.raise_for_status()
-                return f"Объекты Blender: {response.json()}"
+                return response.json()
                 
         except httpx.ConnectError:
-            return "Не удалось подключиться к Blender API. Убедитесь, что Blender запущен с включенным API."
+            raise ConnectionError("Не удалось подключиться к Blender API. Убедитесь, что Blender запущен с включенным API.")
         except Exception as e:
-            return f"Ошибка Blender API: {str(e)}"
+            raise RuntimeError(f"Ошибка Blender API: {str(e)}")
     
-    async def create_simple_shape(self, shape_type: str = "cube", size: float = 1.0):
+    async def create_simple_shape(self, shape_type: str = "cube", size: float = 1.0) -> Dict[str, Any]:
         """Создать простую фигуру (имитация)."""
         shapes = ["cube", "sphere", "cylinder", "cone"]
         if shape_type.lower() not in shapes:
-            return f"Неизвестный тип фигуры. Доступные: {', '.join(shapes)}"
+            raise ValueError(f"Неизвестный тип фигуры. Доступные: {', '.join(shapes)}")
         
-        # Имитация создания объекта в CAD
-        return f"Создана {shape_type} размера {size} в CAD системе"
+        return {
+            "shape_type": shape_type,
+            "size": size,
+            "status": "created",
+            "message": f"Создана {shape_type} размера {size} в CAD системе"
+        }
 
 # Глобальный экземпляр клиента
 cad_client = CADClient()
