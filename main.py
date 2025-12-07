@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 import uvicorn
-from cad_client import cad_client
+from common_logic import cad_client
 import asyncio
 
 app = FastAPI(title="CAD API Gateway")

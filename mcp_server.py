@@ -1,5 +1,5 @@
 from fastmcp import FastMCP
-from cad_client import cad_client
+from common_logic import cad_client
 import asyncio
 
 mcp = FastMCP("CAD Integration Server", dependencies=["httpx"])
