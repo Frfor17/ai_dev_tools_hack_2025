@@ -1,59 +1,88 @@
 from fastapi import FastAPI, HTTPException
 import uvicorn
-from common_logic import cad_client
+from common_logic import core
 import asyncio
+from mcp_server import mcp
+import threading
 
 app = FastAPI(title="CAD API Gateway")
 
+@app.get("/api/mcp/status")
+async def get_mcp_status():
+    """Получить статус MCP сервера."""
+    return {
+        "status": "running",
+        "tools": list(mcp.registered_tools.keys()),
+        "description": mcp.description
+    }
+
 @app.get("/api/cad/documents")
 async def get_documents():
-    """Получить документы CAD."""
-    result = await cad_client.get_onshape_documents()
+    """Получить документы из FreeCAD."""
+    result = await core.get_onshape_documents()
     return {"result": result}
 
-@app.get("/api/cad/blender-objects")
-async def get_blender_objects():
-    """Получить объекты Blender."""
-    result = await cad_client.get_blender_objects()
-    return {"result": result}
-
-@app.post("/api/cad/create-shape")
-async def create_shape(shape_type: str = "cube", size: float = 1.0):
-    """Создать фигуру в CAD."""
+@app.get("/api/cad/create-shape")
+async def create_shape(shape_type: str = "cube", size: float = 10.0):
+    """
+    Создать фигуру в FreeCAD.
+    
+    Parameters:
+    - shape_type: Тип фигуры (cube, sphere, cylinder)
+    - size: Размер фигуры в мм
+    """
+    # Валидация параметров
     if size <= 0:
-        raise HTTPException(status_code=400, detail="Размер должен быть положительным")
+        raise HTTPException(
+            status_code=400, 
+            detail="Размер должен быть положительным числом"
+        )
     
-    result = await cad_client.create_simple_shape(shape_type, size)
-    return {"result": result}
-
-@app.get("/api/cad/info")
-async def get_cad_info():
-    """Информация о доступных CAD системах."""
-    info_lines = []
+    valid_shapes = ["cube", "sphere", "cylinder"]
+    if shape_type.lower() not in valid_shapes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Неподдерживаемый тип фигуры. Доступно: {', '.join(valid_shapes)}"
+        )
     
-    if cad_client.onshape_key:
-        info_lines.append("Onshape: настроен")
-    if cad_client.blender_url:
-        info_lines.append("Blender API: настроен")
-        
+    # Вызов метода из common_logic
+    result = await core.create_simple_shape(shape_type.lower(), size)
+    
     return {
-        "available_systems": info_lines,
-        "note": "Настройте ключи в .env файле"
+        "result": result,
+        "parameters": {
+            "shape_type": shape_type,
+            "size": size
+        }
     }
 
 @app.get("/")
 async def root():
     return {
-        "message": "CAD API Gateway",
+        "message": "FreeCAD API Gateway",
         "endpoints": {
             "documents": "/api/cad/documents",
-            "blender_objects": "/api/cad/blender-objects",
-            "create_shape": "/api/cad/create-shape",
-            "info": "/api/cad/info"
-        }
+            "create_shape": "/api/cad/create-shape?shape_type=cube&size=10",
+            "create_cube_15mm": "/api/cad/create-shape?shape_type=cube&size=15",
+            "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
+            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10"
+        },
+        "notes": "Размер указывается в миллиметрах"
     }
 
 if __name__ == "__main__":
-    print("CAD FastAPI Server запущен: http://localhost:8000")
-    print("Swagger: http://localhost:8000/docs")
+    # Запуск MCP сервера в отдельном потоке
+    mcp_thread = threading.Thread(target=mcp.run, daemon=True)
+    mcp_thread.start()
+
+    print("=" * 50)
+    print("FreeCAD FastAPI Server запущен")
+    print("MCP Server запущен на порту 8001")
+    print("=" * 50)
+    print("Swagger UI: http://localhost:8000/docs")
+    print("Тест документов: http://localhost:8000/api/cad/documents")
+    print("Создать куб 15мм: http://localhost:8000/api/cad/create-shape?shape_type=cube&size=15")
+    print("Создать сферу 20мм: http://localhost:8000/api/cad/create-shape?shape_type=sphere&size=20")
+    print("Статус MCP: http://localhost:8000/api/mcp/status")
+    print("=" * 50)
     uvicorn.run(app, host="0.0.0.0", port=8000)
