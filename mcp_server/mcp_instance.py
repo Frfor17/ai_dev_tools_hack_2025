@@ -1,5 +1,0 @@
-"""Единый экземпляр FastMCP для всего приложения."""
-
-from fastmcp import FastMCP
-
-mcp = FastMCP("business-intelligence-mcp")
