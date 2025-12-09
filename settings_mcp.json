@@ -1,0 +1,1 @@
+{"mcpServers":{"cad-server":{"command":"e:/project/ai_dev_tools_hack_2025/.venv/Scripts/python.exe","args":["../mcp_server.py"],"cwd":"e:/project/ai_dev_tools_hack_2025/app","alwaysAllow":["get_documents","create_shape","get_mcp_status","create_cube","create_sphere","create_cylinder"],"disabled":false}}}
