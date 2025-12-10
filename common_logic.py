@@ -100,7 +100,7 @@ class FreeCADCore:
             return f"Ошибка создания фигуры: {str(e)}"
 
     def create_rectangle_sketch(self, width=10.0, height=5.0):
-    """Создать простой прямоугольный скетч."""
+        """Создать простой прямоугольный скетч."""
         if not self.freecad:
             return {"success": False, "error": "FreeCAD не подключен"}
         
@@ -122,7 +122,6 @@ class FreeCADCore:
             body.addObject(sketch)
             
             # Создаём прямоугольник в скетче
-            # Точки прямоугольника: (x1, y1), (x2, y2)
             p1 = self.freecad.Vector(-width/2, -height/2, 0)
             p2 = self.freecad.Vector(width/2, -height/2, 0)
             p3 = self.freecad.Vector(width/2, height/2, 0)
@@ -172,6 +171,7 @@ class FreeCADCore:
                 "success": False,
                 "error": f"Ошибка создания скетча: {str(e)}"
             }
+
     def create_cube(self, size=10.0, doc_name="TestDocument"):
         """Создать куб."""
         if not self.freecad or not self.part:
