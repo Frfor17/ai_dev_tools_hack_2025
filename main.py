@@ -5,6 +5,9 @@ import asyncio
 from mcp_instance import mcp
 import threading
 
+# Импорт всех инструментов для регистрации
+from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status
+
 app = FastAPI(title="CAD API Gateway")
 
 @app.get("/api/mcp/status")
@@ -72,7 +75,7 @@ async def root():
 
 if __name__ == "__main__":
     # Запуск MCP сервера в отдельном потоке
-    mcp_thread = threading.Thread(target=mcp.run, daemon=True)
+    mcp_thread = threading.Thread(target=lambda: mcp.run(transport="streamable-http", host="0.0.0.0", port=8000), daemon=True)
     mcp_thread.start()
 
     print("=" * 50)
