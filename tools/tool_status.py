@@ -11,7 +11,7 @@ async def get_mcp_status() -> str:
         response = await client.get(f"{FASTAPI_URL}/api/mcp/status")
         response.raise_for_status()
         data = response.json()
-
+        
         tools_list = "\n".join([f"  - {tool}" for tool in data.get("tools", [])])
         return (f"📊 Статус MCP сервера:\n"
                 f"Состояние: {data.get('status', 'unknown')}\n"

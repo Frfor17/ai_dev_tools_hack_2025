@@ -1,7 +1,5 @@
-from mcp.server.fastmcp import FastMCP
-import httpx
 from mcp_instance import mcp
-
+from .tool_create_shapes import create_shape
 
 @mcp.tool()
 async def create_cube(size: float = 10.0) -> str:

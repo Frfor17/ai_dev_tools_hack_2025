@@ -1,6 +1,9 @@
 from mcp_instance import mcp
 import httpx
 
+# Импорт всех инструментов для регистрации
+from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tools_name, utils
+
 FASTAPI_URL = "http://localhost:8000"
 _client = None
 
@@ -24,5 +27,5 @@ if __name__ == "__main__":
     print("  • create_cylinder(size) - создать цилиндр")
     print("  • get_mcp_status() - статус сервера")
     print("=" * 60)
-
+    
     mcp.run(transport='stdio')
