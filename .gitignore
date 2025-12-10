@@ -3,3 +3,4 @@ __pycache__
 .env
 .roo
 .venv
+tg_bot_config.py
