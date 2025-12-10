@@ -1,7 +1,8 @@
 from mcp_instance import mcp
+from utils import ToolResult
 
 @mcp.tool()
-async def get_documents() -> str:
+async def get_documents() -> ToolResult:
     """
     Получить список CAD документов из системы.
     Возвращает список документов в формате JSON.
@@ -12,6 +13,14 @@ async def get_documents() -> str:
         response = await client.get(f"{FASTAPI_URL}/api/cad/documents")
         response.raise_for_status()
         data = response.json()
-        return f"Документы: {data.get('result', [])}"
+        return ToolResult(
+            content=f"Документы: {data.get('result', [])}",
+            structured_content={"documents": data.get('result', [])},
+            meta={"status": "success"}
+        )
     except Exception as e:
-        return f"Ошибка при получении документов: {str(e)}"
+        return ToolResult(
+            content=f"Ошибка при получении документов: {str(e)}",
+            structured_content={"error": str(e)},
+            meta={"status": "error"}
+        )

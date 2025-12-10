@@ -1,7 +1,8 @@
 from mcp_instance import mcp
+from utils import ToolResult
 
 @mcp.tool()
-async def get_mcp_status() -> str:
+async def get_mcp_status() -> ToolResult:
     """
     Получить статус MCP сервера и доступные инструменты.
     """
@@ -13,8 +14,19 @@ async def get_mcp_status() -> str:
         data = response.json()
         
         tools_list = "\n".join([f"  - {tool}" for tool in data.get("tools", [])])
-        return (f"📊 Статус MCP сервера:\n"
-                f"Состояние: {data.get('status', 'unknown')}\n"
-                f"Доступные инструменты:\n{tools_list}")
+        result_text = (f"📊 Статус MCP сервера:\n"
+                      f"Состояние: {data.get('status', 'unknown')}\n"
+                      f"Доступные инструменты:\n{tools_list}")
+        
+        return ToolResult(
+            content=result_text,
+            structured_content=data,
+            meta={"status": "success"}
+        )
     except Exception as e:
-        return f"Не удалось получить статус: {str(e)}\nУбедитесь, что FastAPI сервер запущен на {FASTAPI_URL}"
+        error_text = f"Не удалось получить статус: {str(e)}\nУбедитесь, что FastAPI сервер запущен на {FASTAPI_URL}"
+        return ToolResult(
+            content=error_text,
+            structured_content={"error": str(e)},
+            meta={"status": "error"}
+        )

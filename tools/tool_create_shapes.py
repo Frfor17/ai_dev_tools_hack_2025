@@ -1,8 +1,9 @@
-import httpx
 from mcp_instance import mcp
+import httpx
+from utils import ToolResult, validate_shape_type, validate_size
 
 @mcp.tool()
-async def create_shape(shape_type: str = "cube", size: float = 10.0) -> str:
+async def create_shape(shape_type: str = "cube", size: float = 10.0) -> ToolResult:
     """
     Создать 3D-фигуру в CAD системе.
     
@@ -12,12 +13,20 @@ async def create_shape(shape_type: str = "cube", size: float = 10.0) -> str:
     """
     from server import get_client, FASTAPI_URL
     
-    valid_shapes = ["cube", "sphere", "cylinder"]
-    if shape_type.lower() not in valid_shapes:
-        return f"Ошибка: неподдерживаемый тип фигуры. Используйте: {', '.join(valid_shapes)}"
+    if not validate_shape_type(shape_type):
+        valid_shapes = ["cube", "sphere", "cylinder"]
+        return ToolResult(
+            content=f"Ошибка: неподдерживаемый тип фигуры. Используйте: {', '.join(valid_shapes)}",
+            structured_content={"error": "invalid_shape_type"},
+            meta={"status": "validation_error"}
+        )
     
-    if size <= 0:
-        return "Ошибка: размер должен быть положительным числом"
+    if not validate_size(size):
+        return ToolResult(
+            content="Ошибка: размер должен быть положительным числом",
+            structured_content={"error": "invalid_size"},
+            meta={"status": "validation_error"}
+        )
     
     client = await get_client()
     try:
@@ -26,11 +35,31 @@ async def create_shape(shape_type: str = "cube", size: float = 10.0) -> str:
         response.raise_for_status()
         data = response.json()
         
-        return (f"✅ Фигура создана успешно!\n"
-                f"Тип: {data.get('parameters', {}).get('shape_type', 'неизвестно')}\n"
-                f"Размер: {data.get('parameters', {}).get('size', 'неизвестно')} мм\n"
-                f"Результат: {data.get('result', 'успешно')}")
+        result_text = (f"✅ Фигура создана успешно!\n"
+                      f"Тип: {data.get('parameters', {}).get('shape_type', 'неизвестно')}\n"
+                      f"Размер: {data.get('parameters', {}).get('size', 'неизвестно')} мм\n"
+                      f"Результат: {data.get('result', 'успешно')}")
+        
+        return ToolResult(
+            content=result_text,
+            structured_content=data,
+            meta={
+                "shape_type": shape_type,
+                "size": size,
+                "status": "success"
+            }
+        )
     except httpx.HTTPStatusError as e:
-        return f"HTTP ошибка: {e.response.status_code} - {e.response.text}"
+        error_text = f"HTTP ошибка: {e.response.status_code} - {e.response.text}"
+        return ToolResult(
+            content=error_text,
+            structured_content={"error": str(e)},
+            meta={"status": "error"}
+        )
     except Exception as e:
-        return f"Ошибка при создании фигуры: {str(e)}"
+        error_text = f"Ошибка при создании фигуры: {str(e)}"
+        return ToolResult(
+            content=error_text,
+            structured_content={"error": str(e)},
+            meta={"status": "error"}
+        )
