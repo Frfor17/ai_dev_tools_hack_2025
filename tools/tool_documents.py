@@ -1,5 +1,5 @@
 from mcp_instance import mcp
-from utils import ToolResult
+from .utils import ToolResult
 
 @mcp.tool()
 async def get_documents() -> ToolResult:

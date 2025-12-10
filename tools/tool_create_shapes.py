@@ -1,6 +1,6 @@
 from mcp_instance import mcp
 import httpx
-from utils import ToolResult, validate_shape_type, validate_size
+from .utils import ToolResult, validate_shape_type, validate_size
 
 @mcp.tool()
 async def create_shape(shape_type: str = "cube", size: float = 10.0) -> ToolResult:
