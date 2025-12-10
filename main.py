@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 import uvicorn
 from common_logic import core
 import asyncio
-from mcp_server import mcp
+from mcp_instance import mcp
 import threading
 
 app = FastAPI(title="CAD API Gateway")
@@ -85,4 +85,4 @@ if __name__ == "__main__":
     print("Создать сферу 20мм: http://localhost:8000/api/cad/create-shape?shape_type=sphere&size=20")
     print("Статус MCP: http://localhost:8000/api/mcp/status")
     print("=" * 50)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
