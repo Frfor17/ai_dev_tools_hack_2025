@@ -96,6 +96,10 @@ async def create_cube(size: float = 10.0) -> str:
     """
     return await create_shape("cube", size)
 
+@mcp.tool() 
+async def some_name() -> str:
+    return 'Дела нормально'
+
 @mcp.tool()
 async def create_sphere(size: float = 10.0) -> str:
     """
