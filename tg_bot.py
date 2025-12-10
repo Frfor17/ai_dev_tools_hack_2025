@@ -1,3 +1,6 @@
+# здесь тг бот, чтобы протестировать решение на пользователях
+
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import tg_bot_config
