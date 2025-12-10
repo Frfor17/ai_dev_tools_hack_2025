@@ -1,4 +1,5 @@
 from mcp_instance import mcp
+import httpx
 
 @mcp.tool()
 async def create_shape(shape_type: str = "cube", size: float = 10.0) -> str:
@@ -33,13 +34,3 @@ async def create_shape(shape_type: str = "cube", size: float = 10.0) -> str:
         return f"HTTP ошибка: {e.response.status_code} - {e.response.text}"
     except Exception as e:
         return f"Ошибка при создании фигуры: {str(e)}"
-
-@mcp.tool()
-async def create_cube(size: float = 10.0) -> str:
-    """
-    Создать куб в CAD системе.
-    
-    Аргументы:
-    - size: Размер куба в миллиметрах (положительное число)
-    """
-    return await create_shape("cube", size)

@@ -1,6 +1,7 @@
 from mcp.server.fastmcp import FastMCP
 import httpx
 from mcp_instance import mcp
+from tool_create_shape import create_shape
 
 
 @mcp.tool()
