@@ -1,4 +1,3 @@
-# tools/create_cylinder.py
 from mcp_instance import mcp
 from .tool_create_shapes import create_shape
 
