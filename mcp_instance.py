@@ -1,6 +1,3 @@
-# тут единый экземпляр fastmcp, по требованиям хака
+from mcp.server.fastmcp import FastMCP
 
-
-from fastmcp import FastMCP
-
-# Создаем единый экземпляр FastMCP
+mcp = FastMCP("CAD-Server")

@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 import uvicorn
 from common_logic import core
 import asyncio
-from mcp_server import mcp
+from mcp_instance import mcp
 import threading
 
 app = FastAPI(title="CAD API Gateway")
