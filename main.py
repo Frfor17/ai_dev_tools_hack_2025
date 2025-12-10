@@ -12,8 +12,8 @@ async def get_mcp_status():
     """Получить статус MCP сервера."""
     return {
         "status": "running",
-        "tools": list(mcp.registered_tools.keys()),
-        "description": mcp.description
+        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder"],
+        "description": "CAD MCP Server for FreeCAD operations"
     }
 
 @app.get("/api/cad/documents")
@@ -77,12 +77,12 @@ if __name__ == "__main__":
 
     print("=" * 50)
     print("FreeCAD FastAPI Server запущен")
-    print("MCP Server запущен на порту 8001")
+    print("MCP Server запущен на порту 8000")
     print("=" * 50)
-    print("Swagger UI: http://localhost:8000/docs")
-    print("Тест документов: http://localhost:8000/api/cad/documents")
-    print("Создать куб 15мм: http://localhost:8000/api/cad/create-shape?shape_type=cube&size=15")
-    print("Создать сферу 20мм: http://localhost:8000/api/cad/create-shape?shape_type=sphere&size=20")
-    print("Статус MCP: http://localhost:8000/api/mcp/status")
+    print("Swagger UI: http://localhost:8001/docs")
+    print("Тест документов: http://localhost:8001/api/cad/documents")
+    print("Создать куб 15мм: http://localhost:8001/api/cad/create-shape?shape_type=cube&size=15")
+    print("Создать сферу 20мм: http://localhost:8001/api/cad/create-shape?shape_type=sphere&size=20")
+    print("Статус MCP: http://localhost:8001/api/mcp/status")
     print("=" * 50)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

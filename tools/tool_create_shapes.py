@@ -1,3 +1,4 @@
+import httpx
 from mcp_instance import mcp
 
 @mcp.tool()
@@ -33,33 +34,3 @@ async def create_shape(shape_type: str = "cube", size: float = 10.0) -> str:
         return f"HTTP ошибка: {e.response.status_code} - {e.response.text}"
     except Exception as e:
         return f"Ошибка при создании фигуры: {str(e)}"
-
-@mcp.tool()
-async def create_cube(size: float = 10.0) -> str:
-    """
-    Создать куб в CAD системе.
-    
-    Аргументы:
-    - size: Размер куба в миллиметрах (положительное число)
-    """
-    return await create_shape("cube", size)
-
-@mcp.tool()
-async def create_sphere(size: float = 10.0) -> str:
-    """
-    Создать сферу в CAD системе.
-    
-    Аргументы:
-    - size: Диаметр сферы в миллиметрах (положительное число)
-    """
-    return await create_shape("sphere", size)
-
-@mcp.tool()
-async def create_cylinder(size: float = 10.0) -> str:
-    """
-    Создать цилиндр в CAD системе.
-    
-    Аргументы:
-    - size: Диаметр цилиндра в миллиметрах (положительное число)
-    """
-    return await create_shape("cylinder", size)
