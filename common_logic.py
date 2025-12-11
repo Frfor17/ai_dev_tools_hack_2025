@@ -159,6 +159,78 @@ class FreeCADCore:
         except Exception as e:
             return f"Ошибка создания фигуры: {str(e)}"
 
+    def create_rectangle_sketch(self, width=10.0, height=5.0):
+        """Создать простой прямоугольный скетч."""
+        if not self.freecad:
+            return {"success": False, "error": "FreeCAD не подключен"}
+        
+        try:
+            # Импортируем нужные модули
+            import Part
+            import Sketcher
+            
+            # Создаём новый документ
+            doc = self.freecad.newDocument("SketchDocument")
+            
+            # Создаём тело для скетча
+            body = doc.addObject('PartDesign::Body', 'Body')
+            
+            # Создаём скетч
+            sketch = doc.addObject('Sketcher::SketchObject', 'RectangleSketch')
+            sketch.Support = (doc.XY_Plane, [''])
+            sketch.MapMode = 'FlatFace'
+            body.addObject(sketch)
+            
+            # Создаём прямоугольник в скетче
+            p1 = self.freecad.Vector(-width/2, -height/2, 0)
+            p2 = self.freecad.Vector(width/2, -height/2, 0)
+            p3 = self.freecad.Vector(width/2, height/2, 0)
+            p4 = self.freecad.Vector(-width/2, height/2, 0)
+            
+            # Добавляем линии прямоугольника
+            sketch.addGeometry(Part.LineSegment(p1, p2), False)
+            sketch.addGeometry(Part.LineSegment(p2, p3), False)
+            sketch.addGeometry(Part.LineSegment(p3, p4), False)
+            sketch.addGeometry(Part.LineSegment(p4, p1), False)
+            
+            # Добавляем горизонтальные и вертикальные ограничения
+            sketch.addConstraint(Sketcher.Constraint('Horizontal', 0))
+            sketch.addConstraint(Sketcher.Constraint('Horizontal', 2))
+            sketch.addConstraint(Sketcher.Constraint('Vertical', 1))
+            sketch.addConstraint(Sketcher.Constraint('Vertical', 3))
+            
+            # Добавляем размеры
+            sketch.addConstraint(Sketcher.Constraint('DistanceX', 1, 1, 1, 2, width))
+            sketch.addConstraint(Sketcher.Constraint('DistanceY', 0, 1, 0, 2, height))
+            
+            # Добавляем равенство противоположных сторон
+            sketch.addConstraint(Sketcher.Constraint('Equal', 0, 2))
+            sketch.addConstraint(Sketcher.Constraint('Equal', 1, 3))
+            
+            # Фиксируем центр в точке (0,0)
+            sketch.addConstraint(Sketcher.Constraint('Symmetric', 1, 1, 0, 1, -1))
+            
+            doc.recompute()
+            
+            # Сохраняем
+            filename = f"sketch_rectangle_{width}x{height}.FCStd"
+            doc.saveAs(filename)
+            
+            return {
+                "success": True,
+                "document": doc.Name,
+                "sketch": sketch.Name,
+                "width": width,
+                "height": height,
+                "file": filename,
+                "message": f"✅ Создан скетч прямоугольника {width}x{height} мм"
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Ошибка создания скетча: {str(e)}"
+            }
 
     def create_cube(self, size=10.0, doc_name="TestDocument", x=0.0, y=0.0, z=0.0):
         """Создать куб в указанных координатах."""

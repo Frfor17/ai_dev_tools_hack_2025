@@ -89,6 +89,30 @@ async def root():
         },
         "notes": "Размер указывается в миллиметрах"
     }
+@app.get("/api/sketch")
+async def sketch(width: float = 10.0, height: float = 5.0):
+    """
+    Создать прямоугольный скетч в FreeCAD.
+    
+    Parameters:
+    - width: Ширина прямоугольника в миллиметрах (положительное число)
+    - height: Высота прямоугольника в миллиметрах (положительное число)
+    """
+    # Вызов функции create_rectangle_sketch из common_logic
+    result = await core.create_rectangle_sketch(width, height)
+    
+    if result["success"]:
+        return {
+            "message": f"✅ Скетч прямоугольника {width}x{height} мм успешно создан!",
+            "document": result["document"],
+            "sketch": result["sketch"],
+            "file": result["file"]
+        }
+    else:
+        return {
+            "error": f"❌ Ошибка создания скетча: {result['error']}"
+        }
+
 
 @app.get("/api/cad/create-complex-shape")
 async def create_complex_shape(
