@@ -15,6 +15,68 @@ class FreeCADCore:
         # Пока мы НЕ подключены к FreeCAD, эти переменные = None
         self.freecad = None # будущий модуль free cad
         self.part = None  # будущий модуль Part
+        self.freecad_path = freecad_path or r'C:\Program Files\FreeCAD 1.0\bin'
+        self.freecad = None
+        self.part = None
+        self.current_doc = None
+
+    async def open_document(self, file_path: str):
+        """Открыть существующий документ FreeCAD или создать новый если не существует."""
+        if not self.freecad:
+            result = self.connect()
+            if not result["success"]:
+                return f"Ошибка подключения: {result.get('error', 'Неизвестная ошибка')}"
+        
+        import os
+        
+        try:
+            if self.current_doc:
+                self.freecad.closeDocument(self.current_doc.Name)
+                self.current_doc = None
+            
+            if not file_path.lower().endswith('.fcstd'):
+                return "Ошибка: Файл должен иметь расширение .FCStd"
+            
+            if os.path.exists(file_path):
+                self.current_doc = self.freecad.openDocument(file_path)
+                return f"Документ открыт: {self.current_doc.Name}"
+            else:
+                # Создать новый документ
+                doc_name = os.path.splitext(os.path.basename(file_path))[0]
+                self.current_doc = self.freecad.newDocument(doc_name)
+                # Сохранить сразу, чтобы файл существовал
+                self.current_doc.saveAs(file_path)
+                return f"Создан новый документ и сохранен по пути: {file_path}. Теперь открыт: {self.current_doc.Name}"
+        
+        except Exception as e:
+            return f"Ошибка открытия/создания документа: {str(e)}"
+
+    async def save_document(self, file_path: str = None):
+        """Сохранить текущий документ FreeCAD."""
+        if not self.current_doc:
+            return "Нет открытого документа для сохранения"
+        
+        try:
+            if file_path:
+                self.current_doc.saveAs(file_path)
+                return f"Документ сохранен как: {file_path}"
+            else:
+                self.current_doc.save()
+                return "Документ сохранен"
+        except Exception as e:
+            return f"Ошибка сохранения документа: {str(e)}"
+
+    async def close_document(self):
+        """Закрыть текущий документ FreeCAD."""
+        if not self.current_doc:
+            return "Нет открытого документа для закрытия"
+        
+        try:
+            self.freecad.closeDocument(self.current_doc.Name)
+            self.current_doc = None
+            return "Документ закрыт"
+        except Exception as e:
+            return f"Ошибка закрытия документа: {str(e)}"
         
     def connect(self):       # self это про себя
         """Подключение к FreeCAD."""
@@ -84,10 +146,8 @@ class FreeCADCore:
             logger.error(f"Error getting documents: {str(e)}")
             return f"Ошибка получения документов: {str(e)}"
         
-    async def create_simple_shape(self, shape_type="cube", size=1.0):
-        """Создать фигуру в FreeCAD."""
-        logger.info(f"create_simple_shape called with shape_type={shape_type}, size={size}")
-        
+    async def create_simple_shape(self, shape_type="cube", size=1.0, x=0.0, y=0.0, z=0.0):
+        """Создать фигуру в FreeCAD только внутри открытого документа с указанными координатами."""
         # Сначала подключаемся, если ещё не подключены
         if not self.freecad:
             logger.info("FreeCAD not connected, calling connect()")
@@ -96,23 +156,24 @@ class FreeCADCore:
                 logger.error(f"Connection failed: {result.get('error', 'Unknown error')}")
                 return f"Ошибка подключения: {result.get('error', 'Неизвестная ошибка')}"
         
+        if not self.current_doc:
+            return "Ошибка: Нет открытого документа. Сначала откройте документ с помощью open_document."
+        
         try:
-            logger.info(f"Creating FreeCAD document: {shape_type}_{size}")
-            # Создаём документ
-            doc = self.freecad.newDocument(f"{shape_type}_{size}")
+            doc = self.current_doc
             
             if shape_type.lower() == "cube":
-                logger.info("Creating cube")
-                shape = self.part.makeBox(size, size, size)
-                obj_name = f"Cube_{size}mm"
+                # Для куба координаты указывают его начальную точку (один из углов)
+                shape = self.part.makeBox(size, size, size, self.freecad.Vector(x, y, z))
+                obj_name = f"Cube_{size}mm_{x}_{y}_{z}"
             elif shape_type.lower() == "sphere":
-                logger.info("Creating sphere")
-                shape = self.part.makeSphere(size/2)
-                obj_name = f"Sphere_{size}mm"
+                # Для сферы координаты указывают центр
+                shape = self.part.makeSphere(size/2, self.freecad.Vector(x, y, z))
+                obj_name = f"Sphere_{size}mm_{x}_{y}_{z}"
             elif shape_type.lower() == "cylinder":
-                logger.info("Creating cylinder")
-                shape = self.part.makeCylinder(size/2, size)
-                obj_name = f"Cylinder_{size}mm"
+                # Для цилиндра координаты указывают центр основания
+                shape = self.part.makeCylinder(size/2, size, self.freecad.Vector(x, y, z))
+                obj_name = f"Cylinder_{size}mm_{x}_{y}_{z}"
             else:
                 logger.error(f"Unknown shape type: {shape_type}")
                 return f"Неизвестный тип фигуры: {shape_type}. Доступно: cube, sphere, cylinder"
@@ -136,8 +197,8 @@ class FreeCADCore:
             return f"Ошибка создания фигуры: {str(e)}"
 
 
-    def create_cube(self, size=10.0, doc_name="TestDocument"):
-        """Создать куб."""
+    def create_cube(self, size=10.0, doc_name="TestDocument", x=0.0, y=0.0, z=0.0):
+        """Создать куб в указанных координатах."""
         if not self.freecad or not self.part:
             return {"success": False, "error": "FreeCAD не подключен"}
         
@@ -145,16 +206,16 @@ class FreeCADCore:
             # Создаём новый документ
             doc = self.freecad.newDocument(doc_name)
             
-            # Создаём куб
-            cube = self.part.makeBox(size, size, size)
+            # Создаём куб в указанных координатах
+            cube = self.part.makeBox(size, size, size, self.freecad.Vector(x, y, z))
             
             # Добавляем объект в документ
-            obj = doc.addObject("Part::Feature", f"Cube_{size}mm")
+            obj = doc.addObject("Part::Feature", f"Cube_{size}mm_{x}_{y}_{z}")
             obj.Shape = cube
             doc.recompute()
             
             # Сохраняем для проверки
-            test_file = f"test_cube_{size}.FCStd"
+            test_file = f"test_cube_{size}_at_{x}_{y}_{z}.FCStd"
             doc.saveAs(test_file)
             
             return {
@@ -162,8 +223,9 @@ class FreeCADCore:
                 "document": doc.Name,
                 "object": obj.Name,
                 "volume": cube.Volume,
+                "position": {"x": x, "y": y, "z": z},
                 "file": test_file,
-                "message": f"✅ Создан куб {size}x{size}x{size} мм"
+                "message": f"✅ Создан куб {size}x{size}x{size} мм в точке ({x}, {y}, {z})"
             }
             
         except Exception as e:
@@ -289,12 +351,13 @@ class FreeCADCore:
         print(f"\n✅ УСПЕХ! FreeCAD {result['version']} загружен")
         
         # Тестируем создание куба
-        test_result = self.create_cube(10, "TestDocument")
+        test_result = self.create_cube(10, "TestDocument", 5, 5, 5)
         
         if test_result["success"]:
             print(f"\n🎉 ВСЁ РАБОТАЕТ!")
             print(f"   Документ: {test_result['document']}")
             print(f"   Объём куба: {test_result['volume']:.2f} мм³")
+            print(f"   Позиция: ({test_result['position']['x']}, {test_result['position']['y']}, {test_result['position']['z']})")
             print(f"   Файл: {test_result['file']}")
         else:
             print(f"\n⚠️  Подключение есть, но создание не работает:")
