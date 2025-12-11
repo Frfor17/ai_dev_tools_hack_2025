@@ -136,6 +136,51 @@ class FreeCADCore:
                 "error": f"Ошибка создания: {str(e)}"
             }
     
+    def create_assemble(assembly_name="MyRobotAssembly"):
+            import FreeCAD as App
+            import FreeCADGui as Gui
+            """
+            Создаёт новый документ FreeCAD и добавляет в него объект сборки Assembly4.
+            
+            Args:
+                assembly_name (str): Имя создаваемой сборки и документа.
+                
+            Returns:
+                dict: Результат операции с полями 'success', 'message', 'document' и 'assembly'.
+            """
+            try:
+                # 1. Создаём новый документ
+                doc = App.newDocument(assembly_name)
+                
+                # 2. Добавляем объект Модели (Model) - это контейнер сборки в Assembly4
+                #    Если Assembly4 не установлен, эта строка вызовет ошибку
+                assembly = doc.addObject("App::Part", "Assembly")
+                assembly.Type = "Assembly"  # Важное свойство для Assembly4
+                
+                # 3. Делаем сборку активным объектом (удобно для дальнейшей работы)
+                doc.recompute()
+                Gui.Selection.clearSelection()
+                Gui.Selection.addSelection(assembly)
+                
+                return {
+                    "success": True,
+                    "message": f"Сборка '{assembly_name}' успешно создана.",
+                    "document": doc.Name,
+                    "assembly": assembly.Name
+                }
+                
+            except Exception as e:
+                # Возвращаем информацию об ошибке, если что-то пошло не так
+                error_msg = f"Ошибка при создании сборки: {str(e)}. Убедитесь, что установлен верстак Assembly4."
+                print(error_msg)  # Для логирования в консоли
+                return {
+                    "success": False,
+                    "message": error_msg,
+                    "document": None,
+                    "assembly": None
+                }
+
+
     def test_connection(self):
         """Полный тест подключения (твой оригинальный код)."""
         print(f"🔍 Проверяем путь: {self.freecad_path}")
