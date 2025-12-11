@@ -136,49 +136,90 @@ class FreeCADCore:
                 "error": f"Ошибка создания: {str(e)}"
             }
     
-    def create_assemble(assembly_name="MyRobotAssembly"):
+    def create_assemble(assembly_name="MyRobotAssembly", create_default_parts=True):
+        """
+        Создаёт новый документ FreeCAD и добавляет в него объект сборки Assembly4.
+        
+        Args:
+            assembly_name (str): Имя создаваемой сборки и документа.
+            create_default_parts (bool): Создать ли стандартные детали (куб, цилиндр, сфера)
+            
+        Returns:
+            dict: Результат операции с полями 'success', 'message', 'document' и 'assembly'.
+        """
+        try:
             import FreeCAD as App
             import FreeCADGui as Gui
-            """
-            Создаёт новый документ FreeCAD и добавляет в него объект сборки Assembly4.
             
-            Args:
-                assembly_name (str): Имя создаваемой сборки и документа.
+            # 1. Создаём новый документ
+            doc = App.newDocument(assembly_name)
+            
+            # 2. Добавляем объект Модели (Model) - это контейнер сборки в Assembly4
+            assembly = doc.addObject("App::Part", "Assembly")
+            assembly.Type = "Assembly"  # Важное свойство для Assembly4
+            
+            parts_list = []
+            
+            # 3. Создаём стандартные детали, если нужно
+            if create_default_parts:
+                # Создаём базовые детали
+                default_parts = [
+                    {"type": "Box", "name": "Base", "length": 20, "width": 15, "height": 5},
+                    {"type": "Cylinder", "name": "Shaft", "radius": 3, "height": 30},
+                    {"type": "Sphere", "name": "Joint", "radius": 8}
+                ]
                 
-            Returns:
-                dict: Результат операции с полями 'success', 'message', 'document' и 'assembly'.
-            """
+                for part_info in default_parts:
+                    try:
+                        if part_info["type"] == "Box":
+                            part = doc.addObject("Part::Box", part_info["name"])
+                            part.Length = part_info["length"]
+                            part.Width = part_info["width"]
+                            part.Height = part_info["height"]
+                        elif part_info["type"] == "Cylinder":
+                            part = doc.addObject("Part::Cylinder", part_info["name"])
+                            part.Radius = part_info["radius"]
+                            part.Height = part_info["height"]
+                        elif part_info["type"] == "Sphere":
+                            part = doc.addObject("Part::Sphere", part_info["name"])
+                            part.Radius = part_info["radius"]
+                        
+                        # Добавляем деталь в сборку
+                        assembly.addObject(part)
+                        parts_list.append(part_info["name"])
+                        
+                    except Exception as part_error:
+                        print(f"Ошибка при создании детали {part_info['name']}: {part_error}")
+            
+            # 4. Делаем сборку активным объектом
+            doc.recompute()
+            
             try:
-                # 1. Создаём новый документ
-                doc = App.newDocument(assembly_name)
-                
-                # 2. Добавляем объект Модели (Model) - это контейнер сборки в Assembly4
-                #    Если Assembly4 не установлен, эта строка вызовет ошибку
-                assembly = doc.addObject("App::Part", "Assembly")
-                assembly.Type = "Assembly"  # Важное свойство для Assembly4
-                
-                # 3. Делаем сборку активным объектом (удобно для дальнейшей работы)
-                doc.recompute()
-                Gui.Selection.clearSelection()
-                Gui.Selection.addSelection(assembly)
-                
-                return {
-                    "success": True,
-                    "message": f"Сборка '{assembly_name}' успешно создана.",
-                    "document": doc.Name,
-                    "assembly": assembly.Name
-                }
-                
-            except Exception as e:
-                # Возвращаем информацию об ошибке, если что-то пошло не так
-                error_msg = f"Ошибка при создании сборки: {str(e)}. Убедитесь, что установлен верстак Assembly4."
-                print(error_msg)  # Для логирования в консоли
-                return {
-                    "success": False,
-                    "message": error_msg,
-                    "document": None,
-                    "assembly": None
-                }
+                if hasattr(Gui, 'Selection'):
+                    Gui.Selection.clearSelection()
+                    Gui.Selection.addSelection(assembly)
+            except:
+                pass  # Игнорируем ошибки в консольном режиме
+            
+            return {
+                "success": True,
+                "message": f"Сборка '{assembly_name}' успешно создана" + 
+                        (f" с {len(parts_list)} деталями" if parts_list else ""),
+                "document": doc.Name,
+                "assembly": assembly.Name,
+                "parts": parts_list
+            }
+        
+        except Exception as e:
+            error_msg = f"Ошибка при создании сборки: {str(e)}. Убедитесь, что установлен верстак Assembly4."
+            print(error_msg)
+            return {
+                "success": False,
+                "message": error_msg,
+                "document": None,
+                "assembly": None,
+                "parts": []
+            }
 
 
     def test_connection(self):

@@ -1,4 +1,5 @@
 from common_logic import FreeCADCore
+from mcp_instance import mcp
 
 @mcp.tool()
 def create_assembly_tool(name: str = "MyRobotAssembly"):

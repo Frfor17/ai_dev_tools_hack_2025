@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 import uvicorn
 from common_logic import core
 import asyncio
@@ -59,6 +59,44 @@ async def create_shape(shape_type: str = "cube", size: float = 10.0):
         }
     }
 
+# НОВЫЙ ЭНДПОИНТ ДЛЯ СОЗДАНИЯ СБОРКИ
+@app.post("/api/cad/create-assembly")
+async def create_assembly(
+    assembly_name: str = Query(..., description="Имя сборки"),
+    create_default_parts: bool = Query(True, description="Создать стандартные детали автоматически")
+):
+    """
+    Создать новую сборку Assembly4 в FreeCAD.
+    
+    Parameters:
+    - assembly_name: Уникальное имя для сборки
+    - create_default_parts: Автоматически создать базовые детали (куб, цилиндр, сфера)
+    """
+    try:
+        # Используем синхронный вызов, так как FreeCAD API обычно синхронный
+        result = await asyncio.to_thread(core.create_assemble, assembly_name, create_default_parts)
+        
+        if result.get("success", False):
+            return {
+                "status": "success",
+                "message": result.get("message", "Сборка создана успешно"),
+                "assembly_name": result.get("assembly_name", assembly_name),
+                "parts": result.get("parts", []),
+                "document": result.get("document_name")
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("message", "Неизвестная ошибка при создании сборки")
+            )
+            
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при создании сборки: {str(e)}"
+        )
+
+
 @app.get("/")
 async def root():
     return {
@@ -84,6 +122,7 @@ if __name__ == "__main__":
     print("=" * 50)
     print("Swagger UI: http://localhost:8001/docs")
     print("Тест документов: http://localhost:8001/api/cad/documents")
+    print("Создать сборку: POST /api/cad/create-assembly?assembly_name=MyRobot")
     print("Создать куб 15мм: http://localhost:8001/api/cad/create-shape?shape_type=cube&size=15")
     print("Создать сферу 20мм: http://localhost:8001/api/cad/create-shape?shape_type=sphere&size=20")
     print("Статус MCP: http://localhost:8001/api/mcp/status")
