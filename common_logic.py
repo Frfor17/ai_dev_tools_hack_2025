@@ -8,13 +8,17 @@ class FreeCADCore:
     """Минимальный клиент для работы с FreeCAD."""
     
     def __init__(self, freecad_path=None):
-        self.freecad_path = freecad_path or r'C:\Program Files\FreeCAD 1.0\bin'
-        self.freecad = None
-        self.part = None
+        #   init короче это функция базовая для всех классов, она используется, когда создаёшь объект этого класса
+        #    freecad_path = путь к FreeCAD, или если не указан,
+        #    то по умолчанию 'C:\Program Files\FreeCAD  1.0\bin'
+        self.freecad_path = freecad_path or r'C:\Program Files\FreeCAD  1.0\bin' # где нахуй путь фрикада и почему мне показывает тут ошибку? где ебанный фрикад, тут же указан путь, чё он не пашет
+        # Пока мы НЕ подключены к FreeCAD, эти переменные = None
+        self.freecad = None # будущий модуль free cad
+        self.part = None  # будущий модуль Part
         
-    def connect(self):
+    def connect(self):       # self это про себя
         """Подключение к FreeCAD."""
-        logger.info(f"Connecting to FreeCAD at {self.freecad_path}")
+        logger.info(f"Connecting to FreeCAD at {self.freecad_path}") # self.freecad_path - это путь к фрикаду
         
         # 1. Добавляем путь
         if self.freecad_path not in sys.path:
@@ -168,9 +172,9 @@ class FreeCADCore:
                 "error": f"Ошибка создания: {str(e)}"
             }
     
-    def create_assemble(assembly_name="MyRobotAssembly", create_default_parts=True):
+    def create_assemble(self, assembly_name="MyRobotAssembly", create_default_parts=True):
         """
-        Создаёт новый документ FreeCAD и добавляет в него объект сборки Assembly4.
+        Создаёт новый документ FreeCAD и добавляет в него объект сборки.
         
         Args:
             assembly_name (str): Имя создаваемой сборки и документа.
@@ -180,19 +184,39 @@ class FreeCADCore:
             dict: Результат операции с полями 'success', 'message', 'document' и 'assembly'.
         """
         try:
-            import FreeCAD as App
-            import FreeCADGui as Gui
+            # АВТОМАТИЧЕСКОЕ ПОДКЛЮЧЕНИЕ, как в create_simple_shape
+            if not self.freecad:
+                logger.info("FreeCAD not connected, calling connect()")
+                result = self.connect()
+                if not result["success"]:
+                    logger.error(f"Connection failed: {result.get('error', 'Unknown error')}")
+                    return {
+                        "success": False,
+                        "message": f"Ошибка подключения: {result.get('error', 'Неизвестная ошибка')}",
+                        "document": None,
+                        "assembly": None,
+                        "parts": []
+                    }
+            # Используем уже подключённые self.freecad и self.part
+            if not self.freecad or not self.part:
+                return {
+                    "success": False,
+                    "message": "FreeCAD не подключен. Сначала вызовите connect().",
+                    "document": None,
+                    "assembly": None,
+                    "parts": []
+                }
             
-            # 1. Создаём новый документ
-            doc = App.newDocument(assembly_name)
+            # Создаём новый документ
+            doc = self.freecad.newDocument(assembly_name)
             
-            # 2. Добавляем объект Модели (Model) - это контейнер сборки в Assembly4
+            # Добавляем объект Модели (App::Part) - это контейнер сборки
             assembly = doc.addObject("App::Part", "Assembly")
-            assembly.Type = "Assembly"  # Важное свойство для Assembly4
+            assembly.Label = assembly_name
             
             parts_list = []
             
-            # 3. Создаём стандартные детали, если нужно
+            # Создаём стандартные детали, если нужно
             if create_default_parts:
                 # Создаём базовые детали
                 default_parts = [
@@ -223,19 +247,12 @@ class FreeCADCore:
                     except Exception as part_error:
                         print(f"Ошибка при создании детали {part_info['name']}: {part_error}")
             
-            # 4. Делаем сборку активным объектом
+            # Делаем сборку активным объектом
             doc.recompute()
-            
-            try:
-                if hasattr(Gui, 'Selection'):
-                    Gui.Selection.clearSelection()
-                    Gui.Selection.addSelection(assembly)
-            except:
-                pass  # Игнорируем ошибки в консольном режиме
             
             return {
                 "success": True,
-                "message": f"Сборка '{assembly_name}' успешно создана" + 
+                "message": f"Сборка '{assembly_name}' успешно создана" +
                         (f" с {len(parts_list)} деталями" if parts_list else ""),
                 "document": doc.Name,
                 "assembly": assembly.Name,
@@ -243,7 +260,7 @@ class FreeCADCore:
             }
         
         except Exception as e:
-            error_msg = f"Ошибка при создании сборки: {str(e)}. Убедитесь, что установлен верстак Assembly4."
+            error_msg = f"Ошибка при создании сборки: {str(e)}"
             print(error_msg)
             return {
                 "success": False,
