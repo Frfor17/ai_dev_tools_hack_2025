@@ -1,4 +1,4 @@
-"""Инструмент для создания 3D-фигуры в CAD системе."""
+"""Инструмент для создания 3D-фигуры в CAD системе с указанными координатами."""
 
 import httpx
 from fastmcp import Context
@@ -10,6 +10,9 @@ from .utils import ToolResult, validate_shape_type, validate_size
 async def _create_shape_impl(
     shape_type: str,
     size: float,
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
     ctx: Context = None
 ) -> ToolResult:
     """
@@ -18,13 +21,14 @@ async def _create_shape_impl(
     Args:
         shape_type: Тип фигуры: cube (куб), sphere (сфера), cylinder (цилиндр)
         size: Размер фигуры в миллиметрах (положительное число)
+        x, y, z: Координаты центра фигуры в миллиметрах
         ctx: Контекст для логирования
     
     Returns:
         ToolResult: Результат выполнения инструмента
     """
     if ctx:
-        await ctx.info(f"🚀 Начинаем создание фигуры типа: {shape_type}")
+        await ctx.info(f"🚀 Начинаем создание фигуры типа: {shape_type} в точке ({x}, {y}, {z})")
     
     if not validate_shape_type(shape_type):
         valid_shapes = ["cube", "sphere", "cylinder"]
@@ -50,13 +54,19 @@ async def _create_shape_impl(
         )
     
     if ctx:
-        await ctx.info(f"🔧 Параметры: тип={shape_type}, размер={size}мм")
+        await ctx.info(f"🔧 Параметры: тип={shape_type}, размер={size}мм, координаты=({x}, {y}, {z})")
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            params = {"shape_type": shape_type.lower(), "size": size}
+            params = {
+                "shape_type": shape_type.lower(), 
+                "size": size,
+                "x": x,
+                "y": y,
+                "z": z
+            }
             response = await client.get(
-                "http://localhost:8001/api/cad/create-shape",  # Исправил порт на 8000 для consistency с FastAPI
+                "http://localhost:8001/api/cad/create-shape",
                 params=params
             )
             response.raise_for_status()
@@ -69,6 +79,7 @@ async def _create_shape_impl(
                 f"✅ Фигура создана успешно!\n"
                 f"📐 Тип: {data.get('parameters', {}).get('shape_type', 'неизвестно')}\n"
                 f"📏 Размер: {data.get('parameters', {}).get('size', 'неизвестно')} мм\n"
+                f"📍 Координаты: ({x}, {y}, {z}) мм\n"
                 f"🎯 Результат: {data.get('result', 'успешно')}"
             )
             
@@ -78,6 +89,9 @@ async def _create_shape_impl(
                 meta={
                     "shape_type": shape_type,
                     "size": size,
+                    "x": x,
+                    "y": y,
+                    "z": z,
                     "status": "success"
                 }
             )
@@ -106,9 +120,10 @@ async def _create_shape_impl(
 @mcp.tool(
     name="create_shape",
     description="""
-    Создать 3D-фигуру в CAD системе.
+    Создать 3D-фигуру в CAD системе в указанных координатах.
     Поддерживаемые типы фигур: cube (куб), sphere (сфера), cylinder (цилиндр).
     Размер указывается в миллиметрах как положительное число.
+    Координаты x, y, z указывают положение центра фигуры (или начальную точку для куба).
     """
 )
 async def create_shape(
@@ -120,7 +135,19 @@ async def create_shape(
         10.0,
         description="Размер фигуры в миллиметрах (положительное число)"
     ),
+    x: float = Field(
+        0.0,
+        description="X-координата центра фигуры (в мм)"
+    ),
+    y: float = Field(
+        0.0,
+        description="Y-координата центра фигуры (в мм)"
+    ),
+    z: float = Field(
+        0.0,
+        description="Z-координата центра фигуры (в мм)"
+    ),
     ctx: Context = None
 ) -> ToolResult:
     """Обертка для MCP-инструмента."""
-    return await _create_shape_impl(shape_type, size, ctx)
+    return await _create_shape_impl(shape_type, size, x, y, z, ctx)
