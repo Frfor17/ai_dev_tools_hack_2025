@@ -8,6 +8,65 @@ class FreeCADCore:
         self.freecad_path = freecad_path or r'C:\Program Files\FreeCAD 1.0\bin'
         self.freecad = None
         self.part = None
+        self.current_doc = None
+
+    async def open_document(self, file_path: str):
+        """Открыть существующий документ FreeCAD или создать новый если не существует."""
+        if not self.freecad:
+            result = self.connect()
+            if not result["success"]:
+                return f"Ошибка подключения: {result.get('error', 'Неизвестная ошибка')}"
+        
+        import os
+        
+        try:
+            if self.current_doc:
+                self.freecad.closeDocument(self.current_doc.Name)
+                self.current_doc = None
+            
+            if not file_path.lower().endswith('.fcstd'):
+                return "Ошибка: Файл должен иметь расширение .FCStd"
+            
+            if os.path.exists(file_path):
+                self.current_doc = self.freecad.openDocument(file_path)
+                return f"Документ открыт: {self.current_doc.Name}"
+            else:
+                # Создать новый документ
+                doc_name = os.path.splitext(os.path.basename(file_path))[0]
+                self.current_doc = self.freecad.newDocument(doc_name)
+                # Сохранить сразу, чтобы файл существовал
+                self.current_doc.saveAs(file_path)
+                return f"Создан новый документ и сохранен по пути: {file_path}. Теперь открыт: {self.current_doc.Name}"
+        
+        except Exception as e:
+            return f"Ошибка открытия/создания документа: {str(e)}"
+
+    async def save_document(self, file_path: str = None):
+        """Сохранить текущий документ FreeCAD."""
+        if not self.current_doc:
+            return "Нет открытого документа для сохранения"
+        
+        try:
+            if file_path:
+                self.current_doc.saveAs(file_path)
+                return f"Документ сохранен как: {file_path}"
+            else:
+                self.current_doc.save()
+                return "Документ сохранен"
+        except Exception as e:
+            return f"Ошибка сохранения документа: {str(e)}"
+
+    async def close_document(self):
+        """Закрыть текущий документ FreeCAD."""
+        if not self.current_doc:
+            return "Нет открытого документа для закрытия"
+        
+        try:
+            self.freecad.closeDocument(self.current_doc.Name)
+            self.current_doc = None
+            return "Документ закрыт"
+        except Exception as e:
+            return f"Ошибка закрытия документа: {str(e)}"
         
     def connect(self):
         """Подключение к FreeCAD."""
@@ -62,16 +121,18 @@ class FreeCADCore:
             return f"Ошибка получения документов: {str(e)}"
         
     async def create_simple_shape(self, shape_type="cube", size=1.0):
-        """Создать фигуру в FreeCAD."""
+        """Создать фигуру в FreeCAD только внутри открытого документа."""
         # Сначала подключаемся, если ещё не подключены
         if not self.freecad:
             result = self.connect()
             if not result["success"]:
                 return f"Ошибка подключения: {result.get('error', 'Неизвестная ошибка')}"
         
+        if not self.current_doc:
+            return "Ошибка: Нет открытого документа. Сначала откройте документ с помощью open_document."
+        
         try:
-            # Создаём документ
-            doc = self.freecad.newDocument(f"{shape_type}_{size}")
+            doc = self.current_doc
             
             if shape_type.lower() == "cube":
                 shape = self.part.makeBox(size, size, size)
@@ -90,11 +151,7 @@ class FreeCADCore:
             obj.Shape = shape
             doc.recompute()
             
-            # Сохраняем файл
-            filename = f"{obj_name}.FCStd"
-            doc.saveAs(filename)
-            
-            return f"Создана {shape_type} размером {size} мм. Файл: {filename}"
+            return f"Создана {shape_type} размером {size} мм в открытом документе {doc.Name}. Для сохранения используйте save_document."
             
         except Exception as e:
             return f"Ошибка создания фигуры: {str(e)}"
