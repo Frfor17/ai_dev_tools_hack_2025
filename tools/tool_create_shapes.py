@@ -56,7 +56,7 @@ async def _create_shape_impl(
         async with httpx.AsyncClient(timeout=30.0) as client:
             params = {"shape_type": shape_type.lower(), "size": size}
             response = await client.get(
-                "http://localhost:8001/api/cad/create-shape",  # Исправил порт на 8001 для consistency с FastAPI
+                "http://localhost:8001/api/cad/create-shape",  # Исправил порт на 8000 для consistency с FastAPI
                 params=params
             )
             response.raise_for_status()

@@ -6,7 +6,7 @@ from mcp_instance import mcp
 import threading
 
 # Импорт всех инструментов для регистрации
-from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status
+from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status,tool_open_document, tool_save_document, tool_close_document
 
 app = FastAPI(title="CAD API Gateway")
 
@@ -15,7 +15,7 @@ async def get_mcp_status():
     """Получить статус MCP сервера."""
     return {
         "status": "running",
-        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder"],
+        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document"],
         "description": "CAD MCP Server for FreeCAD operations"
     }
 
@@ -72,6 +72,23 @@ async def root():
         },
         "notes": "Размер указывается в миллиметрах"
     }
+
+@app.get("/api/cad/open-document")
+async def open_document(file_path: str):
+    if not file_path:
+        raise HTTPException(status_code=400, detail="Путь к файлу обязателен")
+    result = await core.open_document(file_path)
+    return {"result": result}
+
+@app.get("/api/cad/save-document")
+async def save_document(file_path: str = None):
+    result = await core.save_document(file_path)
+    return {"result": result}
+
+@app.get("/api/cad/close-document")
+async def close_document():
+    result = await core.close_document()
+    return {"result": result}
 
 if __name__ == "__main__":
     # Запуск MCP сервера в отдельном потоке
