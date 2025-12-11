@@ -7,7 +7,7 @@ import threading
 import math
 
 # Импорт всех инструментов для регистрации
-from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape
+from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape,tool_test_shape
 
 app = FastAPI(title="CAD API Gateway")
 
@@ -16,7 +16,7 @@ async def get_mcp_status():
     """Получить статус MCP сервера."""
     return {
         "status": "running",
-        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document", "create_complex_shape"],
+        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document", "create_complex_shape","tool_test_shape"],
         "description": "CAD MCP Server for FreeCAD operations"
     }
 
@@ -164,7 +164,6 @@ async def create_complex_shape(
             result_message = f"Тор создан с большим радиусом {major_radius} мм и малым радиусом {minor_radius} мм"
             
         elif shape_type.lower() == "star":
-            # Проверка параметров
             if num_points is None or inner_radius is None or outer_radius is None or height is None:
                 raise HTTPException(
                     status_code=400,
@@ -203,7 +202,6 @@ async def create_complex_shape(
             wire = core.part.makePolygon(points)
             face = core.part.Face(wire)
             
-            # Экструдируем
             extruded = face.extrude(core.freecad.Vector(0, 0, height))
             obj = doc.addObject("Part::Feature", f"Star_{num_points}pts")
             obj.Shape = extruded
@@ -212,7 +210,6 @@ async def create_complex_shape(
             result_message = f"Звезда создана с {num_points} лучами, высотой {height} мм"
             
         elif shape_type.lower() == "gear":
-            # Проверка параметров
             if teeth is None or module is None or outer_radius is None or height is None:
                 raise HTTPException(
                     status_code=400,
@@ -228,8 +225,6 @@ async def create_complex_shape(
                     status_code=400,
                     detail="module, outer_radius и height должны быть положительными"
                 )
-            
-            # Упрощенная реализация шестеренки
             # В реальном проекте нужно использовать более сложную геометрию
             cylinder = core.part.makeCylinder(outer_radius, height)
             obj = doc.addObject("Part::Feature", f"Gear_{teeth}teeth")
@@ -274,9 +269,13 @@ async def root():
             "create_complex_shape": "/api/cad/create-complex-shape?shape_type=star&num_points=5&inner_radius=10&outer_radius=20&height=5",
             "open_document": "/api/cad/open-document?file_path=test.FCStd",
             "save_document": "/api/cad/save-document?file_path=test.FCStd",
-            "close_document": "/api/cad/close-document"
+            "close_document": "/api/cad/close-document",
+            "create_test_shape": "/api/cad/create-test-shape?shape_type=cube&size=10&file_name=my_test.FCStd",
+            "create_test_cube": "/api/cad/create-test-shape?shape_type=cube&size=15",
+            "create_test_sphere": "/api/cad/create-test-shape?shape_type=sphere&size=20",
+            "create_test_cylinder": "/api/cad/create-test-shape?shape_type=cylinder&size=10&size=30",
         },
-        "notes": "Размер указывается в миллиметрах"
+        "notes": "Размер указывается в миллиметрах. Для test_shape можно указать имя файла или оно будет сгенерировано автоматически"
     }
 
 @app.get("/api/cad/open-document")
@@ -296,6 +295,87 @@ async def close_document():
     result = await core.close_document()
     return {"result": result}
 
+@app.get("/api/cad/create-test-shape")
+async def create_test_shape_endpoint(
+    shape_type: str = "cube",
+    size: float = 10.0,
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
+    file_name: str = None
+):
+    """
+    Создать тестовую 3D-фигуру и сохранить в файл.
+    
+    Parameters:
+    - shape_type: Тип фигуры (cube, sphere, cylinder)
+    - size: Размер фигуры в мм
+    - x, y, z: Координаты центра фигуры (в мм)
+    - file_name: Имя файла (если None, будет сгенерировано автоматически)
+    """
+    # Валидация параметров
+    if size <= 0:
+        raise HTTPException(
+            status_code=400, 
+            detail="Размер должен быть положительным числом"
+        )
+    valid_shapes = ["cube", "sphere", "cylinder"]
+    if shape_type.lower() not in valid_shapes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Неподдерживаемый тип фигуры. Доступно: {', '.join(valid_shapes)}"
+        )
+    if not file_name:
+        import uuid
+        file_name = f"test_{shape_type}_{size}mm_{uuid.uuid4().hex[:8]}.FCStd"
+    elif not file_name.lower().endswith('.fcstd'):
+        raise HTTPException(
+            status_code=400,
+            detail="Файл должен иметь расширение .FCStd"
+        )
+    
+    try:
+        open_result = await core.open_document(file_name)
+        create_result = await core.create_simple_shape(
+            shape_type.lower(), 
+            size,
+            x,
+            y,
+            z
+        )
+        save_result = await core.save_document(file_name)
+        close_result = await core.close_document()
+        return {
+            "success": True,
+            "result": "Тестовая фигура создана и сохранена успешно",
+            "details": {
+                "file": file_name,
+                "shape_type": shape_type,
+                "size": size,
+                "coordinates": {"x": x, "y": y, "z": z},
+                "open_result": open_result,
+                "create_result": create_result,
+                "save_result": save_result,
+                "close_result": close_result
+            },
+            "message": (
+                f"✅ Файл создан: {file_name}\n"
+                f"📐 Тип фигуры: {shape_type}\n"
+                f"📏 Размер: {size} мм\n"
+                f"📍 Координаты: ({x}, {y}, {z}) мм\n"
+                f"📄 Открытие документа: {open_result}\n"
+                f"🎯 Создание фигуры: {create_result}\n"
+                f"💾 Сохранение: {save_result}\n"
+                f"🚪 Закрытие: {close_result}"
+            )
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при создании тестовой фигуры: {str(e)}"
+        )
+
 if __name__ == "__main__":
     # Запуск MCP сервера в отдельном потоке
     mcp_thread = threading.Thread(target=lambda: mcp.run(transport="streamable-http", host="0.0.0.0", port=8000), daemon=True)
@@ -312,6 +392,9 @@ if __name__ == "__main__":
     print("Создать тор: http://localhost:8001/api/cad/create-complex-shape?shape_type=torus&major_radius=30&minor_radius=10")
     print("Создать звезду: http://localhost:8001/api/cad/create-complex-shape?shape_type=star&num_points=5&inner_radius=10&outer_radius=20&height=5")
     print("Создать шестеренку: http://localhost:8001/api/cad/create-complex-shape?shape_type=gear&teeth=12&module=2&outer_radius=20&height=5")
+    print("Создать тестовый куб: http://localhost:8001/api/cad/create-test-shape?shape_type=cube&size=15")
+    print("Создать тестовую сферу: http://localhost:8001/api/cad/create-test-shape?shape_type=sphere&size=20&x=10&y=10&z=10")
+    print("Создать тестовый цилиндр: http://localhost:8001/api/cad/create-test-shape?shape_type=cylinder&size=10&size=25&file_name=my_cylinder.FCStd")
     print("Статус MCP: http://localhost:8001/api/mcp/status")
     print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8001)
