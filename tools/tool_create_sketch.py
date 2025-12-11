@@ -1,5 +1,5 @@
 from mcp_instance import mcp
-from .common_logic import FreeCADCore
+from ..common_logic import FreeCADCore
 
 # Инициализируем клиент для работы с FreeCAD
 freecad_client = FreeCADCore()
@@ -8,7 +8,7 @@ freecad_client = FreeCADCore()
 async def create_rectangle_sketch_tool(width: float = 10.0, height: float = 5.0) -> str:
     """
     Создать прямоугольный скетч в CAD системе.
-    
+        
     Аргументы:
     - width: Ширина прямоугольника в миллиметрах (положительное число)
     - height: Высота прямоугольника в миллиметрах (положительное число)

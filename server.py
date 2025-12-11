@@ -2,7 +2,7 @@ from mcp_instance import mcp
 import httpx
 
 # Импорт всех инструментов для регистрации
-from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tools_name, utils
+from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tools_name, utils, tool_create_sketch
 
 FASTAPI_URL = "http://localhost:8000"
 _client = None
@@ -25,6 +25,7 @@ if __name__ == "__main__":
     print("  • create_cube(size) - создать куб")
     print("  • create_sphere(size) - создать сферу")
     print("  • create_cylinder(size) - создать цилиндр")
+    print("  • create_rectangle_sketch(width, height) - создать прямоугольный скетч")
     print("  • get_mcp_status() - статус сервера")
     print("=" * 60)
     
