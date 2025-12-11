@@ -1,5 +1,6 @@
 import FreeCAD as App
 import FreeCADGui as Gui
+from common_logic import FreeCADCore
 
 def add_part_to_assembly(assembly_name, part_name=None, part_type="Box"):
     """
