@@ -1,5 +1,8 @@
 import sys
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class FreeCADCore:
     """Минимальный клиент для работы с FreeCAD."""
@@ -11,25 +14,34 @@ class FreeCADCore:
         
     def connect(self):
         """Подключение к FreeCAD."""
+        logger.info(f"Connecting to FreeCAD at {self.freecad_path}")
+        
         # 1. Добавляем путь
         if self.freecad_path not in sys.path:
+            logger.info(f"Adding FreeCAD path to sys.path: {self.freecad_path}")
             sys.path.append(self.freecad_path)
         
         # 2. Пытаемся импортировать
         try:
+            logger.info("Importing FreeCAD...")
             import FreeCAD
             import Part
+            logger.info("FreeCAD imported successfully")
             
             self.freecad = FreeCAD
             self.part = Part
             
+            version = '.'.join(map(str, FreeCAD.Version()[0:3]))
+            logger.info(f"FreeCAD version: {version}")
+            
             return {
                 "success": True,
-                "version": '.'.join(map(str, FreeCAD.Version()[0:3])),
+                "version": version,
                 "message": f"✅ FreeCAD загружен"
             }
             
         except ImportError as e:
+            logger.error(f"Failed to import FreeCAD: {e}")
             return {
                 "success": False,
                 "error": f"Ошибка импорта: {e}",
@@ -38,13 +50,18 @@ class FreeCADCore:
     
     async def get_onshape_documents(self):
         """Метод для совместимости с FastAPI кодом."""
+        logger.info("get_onshape_documents called")
+        
         # Сначала подключаемся, если ещё не подключены
         if not self.freecad:
+            logger.info("FreeCAD not connected, calling connect()")
             result = self.connect()
             if not result["success"]:
+                logger.error(f"Connection failed: {result.get('error', 'Unknown error')}")
                 return f"Ошибка подключения: {result.get('error', 'Неизвестная ошибка')}"
         
         try:
+            logger.info("Getting FreeCAD documents...")
             # Получаем документы из FreeCAD
             docs = []
             for doc in self.freecad.listDocuments().values():
@@ -53,50 +70,65 @@ class FreeCADCore:
                     "object_count": len(doc.Objects)
                 })
             
+            logger.info(f"Found {len(docs)} documents")
             if docs:
                 return f"Документы FreeCAD: {docs}"
             else:
                 return "Нет открытых документов"
                 
         except Exception as e:
+            logger.error(f"Error getting documents: {str(e)}")
             return f"Ошибка получения документов: {str(e)}"
         
     async def create_simple_shape(self, shape_type="cube", size=1.0):
         """Создать фигуру в FreeCAD."""
+        logger.info(f"create_simple_shape called with shape_type={shape_type}, size={size}")
+        
         # Сначала подключаемся, если ещё не подключены
         if not self.freecad:
+            logger.info("FreeCAD not connected, calling connect()")
             result = self.connect()
             if not result["success"]:
+                logger.error(f"Connection failed: {result.get('error', 'Unknown error')}")
                 return f"Ошибка подключения: {result.get('error', 'Неизвестная ошибка')}"
         
         try:
+            logger.info(f"Creating FreeCAD document: {shape_type}_{size}")
             # Создаём документ
             doc = self.freecad.newDocument(f"{shape_type}_{size}")
             
             if shape_type.lower() == "cube":
+                logger.info("Creating cube")
                 shape = self.part.makeBox(size, size, size)
                 obj_name = f"Cube_{size}mm"
             elif shape_type.lower() == "sphere":
+                logger.info("Creating sphere")
                 shape = self.part.makeSphere(size/2)
                 obj_name = f"Sphere_{size}mm"
             elif shape_type.lower() == "cylinder":
+                logger.info("Creating cylinder")
                 shape = self.part.makeCylinder(size/2, size)
                 obj_name = f"Cylinder_{size}mm"
             else:
+                logger.error(f"Unknown shape type: {shape_type}")
                 return f"Неизвестный тип фигуры: {shape_type}. Доступно: cube, sphere, cylinder"
             
             # Добавляем объект в документ
+            logger.info(f"Adding object to document: {obj_name}")
             obj = doc.addObject("Part::Feature", obj_name)
             obj.Shape = shape
             doc.recompute()
             
             # Сохраняем файл
             filename = f"{obj_name}.FCStd"
+            logger.info(f"Saving file: {filename}")
             doc.saveAs(filename)
             
+            logger.info(f"Shape created successfully: {shape_type} {size}mm")
             return f"Создана {shape_type} размером {size} мм. Файл: {filename}"
             
         except Exception as e:
+            logger.error(f"Error creating shape: {str(e)}")
             return f"Ошибка создания фигуры: {str(e)}"
 
 
