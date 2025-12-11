@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 # Импорт всех инструментов для регистрации
 from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape,tool_test_shape
+from tools.tool_create_assembly import create_assemble
+
 
 app = FastAPI(title="CAD API Gateway")
 
@@ -114,7 +116,7 @@ async def create_assembly(
     try:
         # Используем синхронный вызов, так как FreeCAD API обычно синхронный
         logger.info(f"Calling core.create_assemble({assembly_name}, {create_default_parts})")
-        result = await asyncio.to_thread(core.create_assemble, assembly_name, create_default_parts)
+        result = await asyncio.to_thread(create_assemble, core, assembly_name, create_default_parts)
         logger.info(f"core.create_assemble result: {result}")
         
         if result.get("success", False):
