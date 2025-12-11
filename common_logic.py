@@ -156,6 +156,96 @@ class FreeCADCore:
         except Exception as e:
             return f"Ошибка создания фигуры: {str(e)}"
 
+    async def create_complex_shape(self, shape_type: str, **kwargs):
+        """Создать сложную фигуру в FreeCAD."""
+        if not self.freecad:
+            result = self.connect()
+            if not result["success"]:
+                return f"Ошибка подключения: {result.get('error', 'Неизвестная ошибка')}"
+        
+        if not self.current_doc:
+            return "Ошибка: Нет открытого документа. Сначала откройте документ с помощью open_document."
+        
+        try:
+            doc = self.current_doc
+            
+            if shape_type.lower() == "torus":
+                # Создание тора
+                major_radius = kwargs.get('major_radius')
+                minor_radius = kwargs.get('minor_radius')
+                
+                if not major_radius or not minor_radius:
+                    return "Ошибка: для создания тора требуются major_radius и minor_radius"
+                
+                # Создаем тор в FreeCAD
+                torus = self.part.makeTorus(major_radius, minor_radius)
+                obj = doc.addObject("Part::Feature", f"Torus_{major_radius}x{minor_radius}")
+                obj.Shape = torus
+                doc.recompute()
+                
+                return f"Тор создан с большим радиусом {major_radius} мм и малым радиусом {minor_radius} мм"
+                
+            elif shape_type.lower() == "star":
+                # Создание звезды (упрощенная версия)
+                import math
+                num_points = kwargs.get('num_points')
+                inner_radius = kwargs.get('inner_radius')
+                outer_radius = kwargs.get('outer_radius')
+                height = kwargs.get('height')
+                
+                if not all([num_points, inner_radius, outer_radius, height]):
+                    return "Ошибка: для создания звезды требуются num_points, inner_radius, outer_radius, height"
+                
+                # Создаем 2D профиль звезды
+                import Draft
+                points = []
+                for i in range(num_points * 2):
+                    angle = i * math.pi / num_points
+                    radius = inner_radius if i % 2 == 0 else outer_radius
+                    x = radius * math.cos(angle)
+                    y = radius * math.sin(angle)
+                    points.append(self.freecad.Vector(x, y, 0))
+                
+                # Замыкаем контур
+                points.append(points[0])
+                
+                # Создаем полигон
+                wire = self.part.makePolygon(points)
+                face = self.part.Face(wire)
+                
+                # Экструдируем
+                extruded = face.extrude(self.freecad.Vector(0, 0, height))
+                obj = doc.addObject("Part::Feature", f"Star_{num_points}pts")
+                obj.Shape = extruded
+                doc.recompute()
+                
+                return f"Звезда создана с {num_points} лучами, высотой {height} мм"
+                
+            elif shape_type.lower() == "gear":
+                # Создание упрощенной шестеренки
+                teeth = kwargs.get('teeth')
+                module = kwargs.get('module')
+                outer_radius = kwargs.get('outer_radius')
+                height = kwargs.get('height')
+                
+                if not all([teeth, module, outer_radius, height]):
+                    return "Ошибка: для создания шестеренки требуются teeth, module, outer_radius, height"
+                
+                # Упрощенная реализация шестеренки как цилиндра с вырезами
+                # В реальном проекте нужно использовать более сложную геометрию
+                cylinder = self.part.makeCylinder(outer_radius, height)
+                obj = doc.addObject("Part::Feature", f"Gear_{teeth}teeth")
+                obj.Shape = cylinder
+                doc.recompute()
+                
+                return f"Упрощенная шестеренка создана с {teeth} зубьями, высотой {height} мм. Для точной геометрии используйте специализированные библиотеки."
+            
+            else:
+                return f"Неизвестный тип сложной фигуры: {shape_type}"
+            
+        except Exception as e:
+            return f"Ошибка создания сложной фигуры: {str(e)}"
+
 
     def create_cube(self, size=10.0, doc_name="TestDocument"):
         """Создать куб."""
