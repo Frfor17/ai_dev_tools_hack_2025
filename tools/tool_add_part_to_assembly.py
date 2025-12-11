@@ -1,8 +1,12 @@
 import FreeCAD as App
 import FreeCADGui as Gui
 from common_logic import FreeCADCore
+from mcp_instance import mcp
+import logging
 
-def add_part_to_assembly(assembly_name, part_name=None, part_type="Box"):
+logger = logging.getLogger(__name__)
+
+def add_part_to_assembly(core, assembly_name, part_name=None, part_type="Box"):
     """
     Добавляет деталь (объект) в сборку Assembly4.
     Если детали с таким именем нет, создаёт новую стандартную деталь.
@@ -16,14 +20,18 @@ def add_part_to_assembly(assembly_name, part_name=None, part_type="Box"):
         dict: Результат с полями 'success', 'message', 'assembly', 'part'.
     """
     try:
-        doc = App.ActiveDocument
-        if not doc:
-            return {
-                "success": False,
-                "message": "Нет активного документа. Сначала создайте сборку.",
-                "assembly": None,
-                "part": None
-            }
+        # проверяем подключение
+        if not core.freecad:
+            logger.info("FreeCAD not connected, calling connect()")
+            result = core.connect()
+            if not result["success"]:
+                logger.error(f"Connection failed: {result.get('error', 'Unknown error')}")
+                return {
+                    "success": False,
+                    "message": f"Ошибка подключения: {result.get('error', 'Неизвестная ошибка')}",
+                    "assembly": None,
+                    "part": None
+                }
 
         # 1. Находим объект сборки
         assembly = doc.getObject(assembly_name)
