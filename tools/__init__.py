@@ -7,3 +7,4 @@ from .tool_status import get_mcp_status as tool_status
 from .tool_open_document import open_document as tool_open_document
 from .tool_save_document import save_document as tool_save_document
 from .tool_close_document import close_document as tool_close_document
+from .tool_create_complex_shape import create_complex_shape as tool_create_complex_shape
