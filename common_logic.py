@@ -311,6 +311,9 @@ class FreeCADCore:
             
             # Делаем сборку активным объектом
             doc.recompute()
+
+            filename = f"{assembly_name}.FCStd"
+            doc.saveAs(filename)
             
             return {
                 "success": True,
