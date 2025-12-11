@@ -120,8 +120,8 @@ class FreeCADCore:
         except Exception as e:
             return f"Ошибка получения документов: {str(e)}"
         
-    async def create_simple_shape(self, shape_type="cube", size=1.0):
-        """Создать фигуру в FreeCAD только внутри открытого документа."""
+    async def create_simple_shape(self, shape_type="cube", size=1.0, x=0.0, y=0.0, z=0.0):
+        """Создать фигуру в FreeCAD только внутри открытого документа с указанными координатами."""
         # Сначала подключаемся, если ещё не подключены
         if not self.freecad:
             result = self.connect()
@@ -135,14 +135,17 @@ class FreeCADCore:
             doc = self.current_doc
             
             if shape_type.lower() == "cube":
-                shape = self.part.makeBox(size, size, size)
-                obj_name = f"Cube_{size}mm"
+                # Для куба координаты указывают его начальную точку (один из углов)
+                shape = self.part.makeBox(size, size, size, self.freecad.Vector(x, y, z))
+                obj_name = f"Cube_{size}mm_{x}_{y}_{z}"
             elif shape_type.lower() == "sphere":
-                shape = self.part.makeSphere(size/2)
-                obj_name = f"Sphere_{size}mm"
+                # Для сферы координаты указывают центр
+                shape = self.part.makeSphere(size/2, self.freecad.Vector(x, y, z))
+                obj_name = f"Sphere_{size}mm_{x}_{y}_{z}"
             elif shape_type.lower() == "cylinder":
-                shape = self.part.makeCylinder(size/2, size)
-                obj_name = f"Cylinder_{size}mm"
+                # Для цилиндра координаты указывают центр основания
+                shape = self.part.makeCylinder(size/2, size, self.freecad.Vector(x, y, z))
+                obj_name = f"Cylinder_{size}mm_{x}_{y}_{z}"
             else:
                 return f"Неизвестный тип фигуры: {shape_type}. Доступно: cube, sphere, cylinder"
             
@@ -151,104 +154,14 @@ class FreeCADCore:
             obj.Shape = shape
             doc.recompute()
             
-            return f"Создана {shape_type} размером {size} мм в открытом документе {doc.Name}. Для сохранения используйте save_document."
+            return f"Создана {shape_type} размером {size} мм в точке ({x}, {y}, {z}) в документе {doc.Name}."
             
         except Exception as e:
             return f"Ошибка создания фигуры: {str(e)}"
 
-    async def create_complex_shape(self, shape_type: str, **kwargs):
-        """Создать сложную фигуру в FreeCAD."""
-        if not self.freecad:
-            result = self.connect()
-            if not result["success"]:
-                return f"Ошибка подключения: {result.get('error', 'Неизвестная ошибка')}"
-        
-        if not self.current_doc:
-            return "Ошибка: Нет открытого документа. Сначала откройте документ с помощью open_document."
-        
-        try:
-            doc = self.current_doc
-            
-            if shape_type.lower() == "torus":
-                # Создание тора
-                major_radius = kwargs.get('major_radius')
-                minor_radius = kwargs.get('minor_radius')
-                
-                if not major_radius or not minor_radius:
-                    return "Ошибка: для создания тора требуются major_radius и minor_radius"
-                
-                # Создаем тор в FreeCAD
-                torus = self.part.makeTorus(major_radius, minor_radius)
-                obj = doc.addObject("Part::Feature", f"Torus_{major_radius}x{minor_radius}")
-                obj.Shape = torus
-                doc.recompute()
-                
-                return f"Тор создан с большим радиусом {major_radius} мм и малым радиусом {minor_radius} мм"
-                
-            elif shape_type.lower() == "star":
-                # Создание звезды (упрощенная версия)
-                import math
-                num_points = kwargs.get('num_points')
-                inner_radius = kwargs.get('inner_radius')
-                outer_radius = kwargs.get('outer_radius')
-                height = kwargs.get('height')
-                
-                if not all([num_points, inner_radius, outer_radius, height]):
-                    return "Ошибка: для создания звезды требуются num_points, inner_radius, outer_radius, height"
-                
-                # Создаем 2D профиль звезды
-                import Draft
-                points = []
-                for i in range(num_points * 2):
-                    angle = i * math.pi / num_points
-                    radius = inner_radius if i % 2 == 0 else outer_radius
-                    x = radius * math.cos(angle)
-                    y = radius * math.sin(angle)
-                    points.append(self.freecad.Vector(x, y, 0))
-                
-                # Замыкаем контур
-                points.append(points[0])
-                
-                # Создаем полигон
-                wire = self.part.makePolygon(points)
-                face = self.part.Face(wire)
-                
-                # Экструдируем
-                extruded = face.extrude(self.freecad.Vector(0, 0, height))
-                obj = doc.addObject("Part::Feature", f"Star_{num_points}pts")
-                obj.Shape = extruded
-                doc.recompute()
-                
-                return f"Звезда создана с {num_points} лучами, высотой {height} мм"
-                
-            elif shape_type.lower() == "gear":
-                # Создание упрощенной шестеренки
-                teeth = kwargs.get('teeth')
-                module = kwargs.get('module')
-                outer_radius = kwargs.get('outer_radius')
-                height = kwargs.get('height')
-                
-                if not all([teeth, module, outer_radius, height]):
-                    return "Ошибка: для создания шестеренки требуются teeth, module, outer_radius, height"
-                
-                # Упрощенная реализация шестеренки как цилиндра с вырезами
-                # В реальном проекте нужно использовать более сложную геометрию
-                cylinder = self.part.makeCylinder(outer_radius, height)
-                obj = doc.addObject("Part::Feature", f"Gear_{teeth}teeth")
-                obj.Shape = cylinder
-                doc.recompute()
-                
-                return f"Упрощенная шестеренка создана с {teeth} зубьями, высотой {height} мм. Для точной геометрии используйте специализированные библиотеки."
-            
-            else:
-                return f"Неизвестный тип сложной фигуры: {shape_type}"
-            
-        except Exception as e:
-            return f"Ошибка создания сложной фигуры: {str(e)}"
 
-
-    def create_cube(self, size=10.0, doc_name="TestDocument"):
-        """Создать куб."""
+    def create_cube(self, size=10.0, doc_name="TestDocument", x=0.0, y=0.0, z=0.0):
+        """Создать куб в указанных координатах."""
         if not self.freecad or not self.part:
             return {"success": False, "error": "FreeCAD не подключен"}
         
@@ -256,16 +169,16 @@ class FreeCADCore:
             # Создаём новый документ
             doc = self.freecad.newDocument(doc_name)
             
-            # Создаём куб
-            cube = self.part.makeBox(size, size, size)
+            # Создаём куб в указанных координатах
+            cube = self.part.makeBox(size, size, size, self.freecad.Vector(x, y, z))
             
             # Добавляем объект в документ
-            obj = doc.addObject("Part::Feature", f"Cube_{size}mm")
+            obj = doc.addObject("Part::Feature", f"Cube_{size}mm_{x}_{y}_{z}")
             obj.Shape = cube
             doc.recompute()
             
             # Сохраняем для проверки
-            test_file = f"test_cube_{size}.FCStd"
+            test_file = f"test_cube_{size}_at_{x}_{y}_{z}.FCStd"
             doc.saveAs(test_file)
             
             return {
@@ -273,8 +186,9 @@ class FreeCADCore:
                 "document": doc.Name,
                 "object": obj.Name,
                 "volume": cube.Volume,
+                "position": {"x": x, "y": y, "z": z},
                 "file": test_file,
-                "message": f"✅ Создан куб {size}x{size}x{size} мм"
+                "message": f"✅ Создан куб {size}x{size}x{size} мм в точке ({x}, {y}, {z})"
             }
             
         except Exception as e:
@@ -301,12 +215,13 @@ class FreeCADCore:
         print(f"\n✅ УСПЕХ! FreeCAD {result['version']} загружен")
         
         # Тестируем создание куба
-        test_result = self.create_cube(10, "TestDocument")
+        test_result = self.create_cube(10, "TestDocument", 5, 5, 5)
         
         if test_result["success"]:
             print(f"\n🎉 ВСЁ РАБОТАЕТ!")
             print(f"   Документ: {test_result['document']}")
             print(f"   Объём куба: {test_result['volume']:.2f} мм³")
+            print(f"   Позиция: ({test_result['position']['x']}, {test_result['position']['y']}, {test_result['position']['z']})")
             print(f"   Файл: {test_result['file']}")
         else:
             print(f"\n⚠️  Подключение есть, но создание не работает:")

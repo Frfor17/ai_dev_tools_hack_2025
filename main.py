@@ -4,9 +4,10 @@ from common_logic import core
 import asyncio
 from mcp_instance import mcp
 import threading
+import math
 
 # Импорт всех инструментов для регистрации
-from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status,tool_open_document, tool_save_document, tool_close_document,tool_create_complex_shape
+from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape
 
 app = FastAPI(title="CAD API Gateway")
 
@@ -15,7 +16,7 @@ async def get_mcp_status():
     """Получить статус MCP сервера."""
     return {
         "status": "running",
-        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document","create_complex_shape"],
+        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document", "create_complex_shape"],
         "description": "CAD MCP Server for FreeCAD operations"
     }
 
@@ -26,13 +27,20 @@ async def get_documents():
     return {"result": result}
 
 @app.get("/api/cad/create-shape")
-async def create_shape(shape_type: str = "cube", size: float = 10.0):
+async def create_shape(
+    shape_type: str = "cube", 
+    size: float = 10.0,
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0
+):
     """
-    Создать фигуру в FreeCAD.
+    Создать фигуру в FreeCAD в указанных координатах.
     
     Parameters:
     - shape_type: Тип фигуры (cube, sphere, cylinder)
     - size: Размер фигуры в мм
+    - x, y, z: Координаты центра фигуры (в мм)
     """
     # Валидация параметров
     if size <= 0:
@@ -48,14 +56,23 @@ async def create_shape(shape_type: str = "cube", size: float = 10.0):
             detail=f"Неподдерживаемый тип фигуры. Доступно: {', '.join(valid_shapes)}"
         )
     
-    # Вызов метода из common_logic
-    result = await core.create_simple_shape(shape_type.lower(), size)
+    # Вызов метода из common_logic с координатами
+    result = await core.create_simple_shape(
+        shape_type.lower(), 
+        size,
+        x,
+        y,
+        z
+    )
     
     return {
         "result": result,
         "parameters": {
             "shape_type": shape_type,
-            "size": size
+            "size": size,
+            "x": x,
+            "y": y,
+            "z": z
         }
     }
 
