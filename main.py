@@ -1,10 +1,17 @@
 from fastapi import FastAPI, HTTPException
+import httpx
 import uvicorn
 from common_logic import core
 import asyncio
 from mcp_instance import mcp
 import threading
 import math
+from dotenv import load_dotenv
+import os
+load_dotenv()
+
+api_key = '821aa690d020da50bdb5919c1b49afd9'
+
 
 # Импорт всех инструментов для регистрации
 from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape,tool_test_shape
@@ -375,6 +382,288 @@ async def create_test_shape_endpoint(
             status_code=500,
             detail=f"Ошибка при создании тестовой фигуры: {str(e)}"
         )
+    
+@app.post("/api/agent/query")
+async def agent_query(query_request: dict):
+    """
+    Обработка запроса через AI агента с выполнением команд.
+    
+    Пример тела запроса:
+    {
+        "query": "Создай куб размером 20мм"
+    }
+    """
+    try:
+        query = query_request.get("query", "").strip()
+        
+        if not query:
+            return {
+                "success": False,
+                "error": "Запрос не может быть пустым"
+            }
+        
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        
+        if not api_key:
+            return {
+                "success": False,
+                "error": "OPENROUTER_API_KEY не найден в .env"
+            }
+        
+        # 1. Получаем ответ от LLM
+        system_prompt = """Ты - AI ассистент для CAD системы FreeCAD.
+
+        Доступные команды и их параметры:
+        1. create_test_shape(shape_type='cube', size=20, file_name=None) - создать тестовую фигуру
+        2. get_mcp_status() - проверить статус MCP сервера
+        3. get_documents() - получить список документов
+        4. open_document(file_path='test.FCStd') - открыть документ
+        5. create_shape(shape_type='cube', size=20, x=0, y=0, z=0) - создать фигуру в документе
+        6. save_document(file_path=None) - сохранить документ
+        7. close_document() - закрыть документ
+
+        ВАЖНО: При создании фигур (create_shape) всегда сначала открывай документ, 
+        затем создавай фигуру, затем сохраняй и закрывай документ.
+        
+        Ответь ТОЛЬКО в формате JSON:
+        {{
+            "command": "имя_команды",
+            "parameters": {{
+                "param1": "value1",
+                "param2": "value2"
+            }},
+            "explanation": "Краткое объяснение на русском",
+            "requires_document": true/false
+        }}
+
+        Если команда не требует параметров, оставь "parameters": {{}}.
+        Поле "requires_document": true для команд, требующих открытого документа."""
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:8001"
+        }
+        
+        payload = {
+            "model": "meta-llama/llama-3.2-3b-instruct:free",
+            "messages": [
+                {"role": "system", "content": system_prompt.format(query=query)},
+                {"role": "user", "content": query}
+            ],
+            "max_tokens": 500,
+            "temperature": 0.3
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            
+            if response.status_code != 200:
+                return {
+                    "success": False,
+                    "error": f"OpenRouter error: {response.status_code}",
+                    "details": response.text[:200]
+                }
+            
+            data = response.json()
+            llm_response = data["choices"][0]["message"]["content"]
+            
+            # 2. Пытаемся распарсить JSON ответ LLM
+            import json as json_lib
+            try:
+                # Убираем возможные лишние символы
+                cleaned_response = llm_response.strip()
+                if cleaned_response.startswith("```json"):
+                    cleaned_response = cleaned_response[7:-3].strip()
+                elif cleaned_response.startswith("```"):
+                    cleaned_response = cleaned_response[3:-3].strip()
+                
+                command_data = json_lib.loads(cleaned_response)
+                command = command_data.get("command")
+                parameters = command_data.get("parameters", {})
+                explanation = command_data.get("explanation", "")
+                requires_document = command_data.get("requires_document", False)
+                
+            except (json_lib.JSONDecodeError, KeyError):
+                # Если не удалось распарсить, возвращаем только текст
+                return {
+                    "success": True,
+                    "query": query,
+                    "result": llm_response,
+                    "executed": False,
+                    "note": "Не удалось распознать команду для выполнения"
+                }
+            
+            # 3. Выполняем команду через MCP сервер
+            mcp_results = []
+            
+            # Функция для работы с документами
+            async def handle_document_operations(command_type, cmd_params):
+                """Обработка команд, требующих работы с документом"""
+                import uuid
+                
+                # Определяем имя файла
+                file_name = parameters.get("file_name", f"auto_{command_type}_{uuid.uuid4().hex[:8]}.FCStd")
+                
+                # Шаг 1: Открываем документ
+                open_result = await client.get(
+                    "http://localhost:8001/api/cad/open-document",
+                    params={"file_path": file_name}
+                )
+                mcp_results.append({"open_document": open_result.json()})
+                
+                # Шаг 2: Выполняем команду создания
+                if command_type == "create_shape":
+                    create_result = await client.get(
+                        "http://localhost:8001/api/cad/create-shape",
+                        params=cmd_params
+                    )
+                    mcp_results.append({"create_shape": create_result.json()})
+                elif command_type == "create_test_shape":
+                    create_result = await client.get(
+                        "http://localhost:8001/api/cad/create-test-shape",
+                        params=cmd_params
+                    )
+                    mcp_results.append({"create_test_shape": create_result.json()})
+                
+                # Шаг 3: Сохраняем документ
+                save_result = await client.get(
+                    "http://localhost:8001/api/cad/save-document",
+                    params={"file_path": file_name}
+                )
+                mcp_results.append({"save_document": save_result.json()})
+                
+                # Шаг 4: Закрываем документ
+                close_result = await client.get("http://localhost:8001/api/cad/close-document")
+                mcp_results.append({"close_document": close_result.json()})
+                
+                return file_name
+            
+            if command == "create_test_shape":
+                # Проверяем параметры
+                shape_type = parameters.get("shape_type", "cube")
+                size = parameters.get("size", 20)
+                file_name = parameters.get("file_name")
+                
+                mcp_params = {"shape_type": shape_type, "size": size}
+                if file_name:
+                    mcp_params["file_name"] = file_name
+                
+                file_used = await handle_document_operations("create_test_shape", mcp_params)
+                
+            elif command == "get_mcp_status":
+                mcp_response = await client.get("http://localhost:8001/api/mcp/status")
+                mcp_results.append(mcp_response.json())
+                
+            elif command == "get_documents":
+                mcp_response = await client.get("http://localhost:8001/api/cad/documents")
+                mcp_results.append(mcp_response.json())
+                
+            elif command == "open_document":
+                file_path = parameters.get("file_path", "test.FCStd")
+                mcp_response = await client.get(
+                    "http://localhost:8001/api/cad/open-document",
+                    params={"file_path": file_path}
+                )
+                mcp_results.append(mcp_response.json())
+                
+            elif command == "create_shape" or requires_document:
+                shape_type = parameters.get("shape_type", "cube")
+                size = parameters.get("size", 20)
+                x = parameters.get("x", 0)
+                y = parameters.get("y", 0)
+                z = parameters.get("z", 0)
+                
+                cmd_params = {
+                    "shape_type": shape_type,
+                    "size": size,
+                    "x": x,
+                    "y": y,
+                    "z": z
+                }
+                
+                file_used = await handle_document_operations("create_shape", cmd_params)
+                
+            elif command == "save_document":
+                file_path = parameters.get("file_path")
+                mcp_params = {}
+                if file_path:
+                    mcp_params["file_path"] = file_path
+                mcp_response = await client.get(
+                    "http://localhost:8001/api/cad/save-document",
+                    params=mcp_params
+                )
+                mcp_results.append(mcp_response.json())
+                
+            elif command == "close_document":
+                mcp_response = await client.get("http://localhost:8001/api/cad/close-document")
+                mcp_results.append(mcp_response.json())
+                
+            else:
+                return {
+                    "success": True,
+                    "query": query,
+                    "result": llm_response,
+                    "executed": False,
+                    "note": f"Команда '{command}' не поддерживается для автоматического выполнения"
+                }
+            
+            # 4. Формируем финальный ответ
+            result_data = {
+                "success": True,
+                "query": query,
+                "llm_response": llm_response,
+                "command": command,
+                "parameters": parameters,
+                "explanation": explanation,
+                "executed": True,
+                "mcp_results": mcp_results,
+            }
+            
+            # Добавляем информацию о файле, если он был создан
+            if command in ["create_shape", "create_test_shape"] or requires_document:
+                result_data["file_created"] = file_used if 'file_used' in locals() else "Неизвестный файл"
+                result_data["full_response"] = (
+                    f"{explanation}\n\n"
+                    f"Файл: {file_used if 'file_used' in locals() else 'Неизвестный'}\n"
+                    f"Результат выполнения:\n{mcp_results}"
+                )
+            else:
+                result_data["full_response"] = f"{explanation}\n\nРезультат выполнения:\n{mcp_results}"
+            
+            return result_data
+            
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": f"Ошибка обработки: {str(e)}",
+            "traceback": traceback.format_exc(),
+            "query": query_request.get("query", "")
+        }
+@app.get("/api/agent/help")
+async def agent_help():
+    """Получить справку по использованию агента."""
+    return {
+        "endpoint": "/api/agent/query",
+        "method": "POST",
+        "description": "Обработка запросов на естественном языке через AI агента",
+        "example_request": {
+            "query": "Создай куб размером 20мм в новом файле test_cube.FCStd"
+        },
+        "available_operations": [
+            "Создание простых фигур (куб, сфера, цилиндр)",
+            "Создание сложных фигур (звезда, шестеренка, тор)",
+            "Открытие/сохранение/закрытие документов",
+            "Проверка статуса системы",
+            "Получение списка документов"
+        ]
+    }
 
 if __name__ == "__main__":
     # Запуск MCP сервера в отдельном потоке
