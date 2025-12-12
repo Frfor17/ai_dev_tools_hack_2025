@@ -1,13 +1,21 @@
+# main.py
 from fastapi import FastAPI, HTTPException
+import httpx
 import uvicorn
 from common_logic import core
 import asyncio
 from mcp_instance import mcp
 import threading
 import math
+from dotenv import load_dotenv
+import os
+import json
 
-# Импорт всех инструментов для регистрации
-from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape,tool_test_shape
+load_dotenv()
+
+
+# Импорт всех инструментов для регистрации MCP
+from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape, tool_test_shape
 
 app = FastAPI(title="CAD API Gateway")
 
@@ -16,7 +24,7 @@ async def get_mcp_status():
     """Получить статус MCP сервера."""
     return {
         "status": "running",
-        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document", "create_complex_shape","tool_test_shape"],
+        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document", "create_complex_shape", "create_test_shape"],
         "description": "CAD MCP Server for FreeCAD operations"
     }
 
@@ -74,20 +82,6 @@ async def create_shape(
             "y": y,
             "z": z
         }
-    }
-
-@app.get("/")
-async def root():
-    return {
-        "message": "FreeCAD API Gateway",
-        "endpoints": {
-            "documents": "/api/cad/documents",
-            "create_shape": "/api/cad/create-shape?shape_type=cube&size=10",
-            "create_cube_15mm": "/api/cad/create-shape?shape_type=cube&size=15",
-            "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
-            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10"
-        },
-        "notes": "Размер указывается в миллиметрах"
     }
 
 @app.get("/api/cad/create-complex-shape")
@@ -256,28 +250,6 @@ async def create_complex_shape(
             detail=f"Ошибка создания сложной фигуры: {str(e)}"
         )
 
-@app.get("/")
-async def root():
-    return {
-        "message": "FreeCAD API Gateway",
-        "endpoints": {
-            "documents": "/api/cad/documents",
-            "create_shape": "/api/cad/create-shape?shape_type=cube&size=10",
-            "create_cube_15mm": "/api/cad/create-shape?shape_type=cube&size=15",
-            "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
-            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10",
-            "create_complex_shape": "/api/cad/create-complex-shape?shape_type=star&num_points=5&inner_radius=10&outer_radius=20&height=5",
-            "open_document": "/api/cad/open-document?file_path=test.FCStd",
-            "save_document": "/api/cad/save-document?file_path=test.FCStd",
-            "close_document": "/api/cad/close-document",
-            "create_test_shape": "/api/cad/create-test-shape?shape_type=cube&size=10&file_name=my_test.FCStd",
-            "create_test_cube": "/api/cad/create-test-shape?shape_type=cube&size=15",
-            "create_test_sphere": "/api/cad/create-test-shape?shape_type=sphere&size=20",
-            "create_test_cylinder": "/api/cad/create-test-shape?shape_type=cylinder&size=10&size=30",
-        },
-        "notes": "Размер указывается в миллиметрах. Для test_shape можно указать имя файла или оно будет сгенерировано автоматически"
-    }
-
 @app.get("/api/cad/open-document")
 async def open_document(file_path: str):
     if not file_path:
@@ -376,6 +348,33 @@ async def create_test_shape_endpoint(
             detail=f"Ошибка при создании тестовой фигуры: {str(e)}"
         )
 
+@app.get("/")
+async def root():
+    return {
+        "message": "FreeCAD API Gateway",
+        "endpoints": {
+            "documents": "/api/cad/documents",
+            "create_shape": "/api/cad/create-shape?shape_type=cube&size=10",
+            "create_cube_15mm": "/api/cad/create-shape?shape_type=cube&size=15",
+            "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
+            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10",
+            "create_complex_shape": "/api/cad/create-complex-shape?shape_type=star&num_points=5&inner_radius=10&outer_radius=20&height=5",
+            "open_document": "/api/cad/open-document?file_path=test.FCStd",
+            "save_document": "/api/cad/save-document?file_path=test.FCStd",
+            "close_document": "/api/cad/close-document",
+            "create_test_shape": "/api/cad/create-test-shape?shape_type=cube&size=10&file_name=my_test.FCStd",
+            "create_test_cube": "/api/cad/create-test-shape?shape_type=cube&size=15",
+            "create_test_sphere": "/api/cad/create-test-shape?shape_type=sphere&size=20",
+            "create_test_cylinder": "/api/cad/create-test-shape?shape_type=cylinder&size=10&size=30",
+            "agent_query": "/api/agent/query (POST)",
+            "agent_status": "/api/agent/status",
+            "agent_help": "/api/agent/help"
+        },
+        "notes": "Размер указывается в миллиметрах. Для test_shape можно указать имя файла или оно будет сгенерировано автоматически"
+    }
+
+# УДАЛЕНО: старый эндпоинт /api/agent/query (перенесен в agent_router)
+
 if __name__ == "__main__":
     # Запуск MCP сервера в отдельном потоке
     mcp_thread = threading.Thread(target=lambda: mcp.run(transport="streamable-http", host="0.0.0.0", port=8000), daemon=True)
@@ -384,17 +383,15 @@ if __name__ == "__main__":
     print("=" * 60)
     print("FreeCAD FastAPI Server запущен")
     print("MCP Server запущен на порту 8000")
+    print("AI Agent (LangChain) инициализирован")
     print("=" * 60)
     print("Swagger UI: http://localhost:8001/docs")
     print("Тест документов: http://localhost:8001/api/cad/documents")
     print("Создать куб 15мм: http://localhost:8001/api/cad/create-shape?shape_type=cube&size=15")
-    print("Создать сферу 20мм: http://localhost:8001/api/cad/create-shape?shape_type=sphere&size=20")
-    print("Создать тор: http://localhost:8001/api/cad/create-complex-shape?shape_type=torus&major_radius=30&minor_radius=10")
-    print("Создать звезду: http://localhost:8001/api/cad/create-complex-shape?shape_type=star&num_points=5&inner_radius=10&outer_radius=20&height=5")
-    print("Создать шестеренку: http://localhost:8001/api/cad/create-complex-shape?shape_type=gear&teeth=12&module=2&outer_radius=20&height=5")
     print("Создать тестовый куб: http://localhost:8001/api/cad/create-test-shape?shape_type=cube&size=15")
-    print("Создать тестовую сферу: http://localhost:8001/api/cad/create-test-shape?shape_type=sphere&size=20&x=10&y=10&z=10")
-    print("Создать тестовый цилиндр: http://localhost:8001/api/cad/create-test-shape?shape_type=cylinder&size=10&size=25&file_name=my_cylinder.FCStd")
-    print("Статус MCP: http://localhost:8001/api/mcp/status")
+    print("AI Agent запрос: POST http://localhost:8001/api/agent/query")
+    print("AI Agent статус: GET http://localhost:8001/api/agent/status")
+    print("Пример запроса к агенту:")
+    print('curl -X POST http://localhost:8001/api/agent/query -H "Content-Type: application/json" -d \'{"query": "Создай куб размером 20мм"}\'')
     print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8001)
