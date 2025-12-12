@@ -74,6 +74,21 @@ async def generate_spec_with_agent(user_prompt: str) -> dict:
             "message": f"Ошибка при генерации спецификации: {str(e)}"
         }
 
+# --- СИНХРОННАЯ ВЕРСИЯ ФУНКЦИИ ---
+def generate_spec_with_agent_sync(user_prompt: str) -> dict:
+    """
+    Синхронная версия функции для генерации JSON-спецификации робота.
+    Используется в FastAPI endpoint.
+    
+    Args:
+        user_prompt: Текстовое описание робота на естественном языке
+        
+    Returns:
+        dict: Результат с полем 'success', 'specification' и 'message'
+    """
+    import asyncio
+    return asyncio.run(generate_spec_with_agent(user_prompt))
+
 # --- 4. ПРИМЕР ИСПОЛЬЗОВАНИЯ ---
 if __name__ == "__main__":
     # Пример вызова

@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Optional
 import uvicorn
 from common_logic import core
 import asyncio
@@ -11,7 +12,7 @@ import math
 from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape,tool_test_shape
 
 # Импорт функции генерации спеки из ai_agent.py
-from ai_agent import generate_spec_with_agent
+from ai_agent import generate_spec_with_agent, generate_spec_with_agent_sync
 
 # Pydantic модель для ввода
 class GenerateSpecRequest(BaseModel):
@@ -282,7 +283,8 @@ async def root():
             "create_test_cube": "/api/cad/create-test-shape?shape_type=cube&size=15",
             "create_test_sphere": "/api/cad/create-test-shape?shape_type=sphere&size=20",
             "create_test_cylinder": "/api/cad/create-test-shape?shape_type=cylinder&size=10&size=30",
-            "generate_robot_spec": "POST /api/ai/generate-spec"
+            "generate_robot_spec": "POST /api/ai/generate-spec",
+            "assemble_robot": "POST /api/ai/assemble-robot"
         },
         "notes": "Размер указывается в миллиметрах. Для test_shape можно указать имя файла или оно будет сгенерировано автоматически"
     }
@@ -338,6 +340,80 @@ async def generate_robot_spec(request: GenerateSpecRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Ошибка при генерации спецификации: {str(e)}"
+        )
+
+
+class AssembleRobotRequest(BaseModel):
+    """Запрос на сборку робота из спецификации"""
+    prompt: str = Field(..., description="Текстовое описание робота для генерации спецификации")
+    document_name: Optional[str] = Field(None, description="Имя документа FreeCAD")
+    output_path: Optional[str] = Field(None, description="Путь для сохранения документа")
+
+
+@app.post("/api/ai/assemble-robot")
+def assemble_robot_from_prompt(request: AssembleRobotRequest):
+    """
+    Сгенерировать спецификацию робота по описанию и создать FreeCAD документ со сборкой.
+    
+    Пример запроса:
+    {
+        "prompt": "Создай спецификацию для четырёхколёсного робота-исследователя с размерами шасси 120x80x40 мм и колёсами диаметром 60 мм.",
+        "document_name": "my_robot",
+        "output_path": "robots/my_robot.FCStd"
+    }
+    
+    Возвращает:
+    {
+        "success": true,
+        "message": "Робот успешно собран!",
+        "document_path": "/path/to/robot.FCStd",
+        "components_created": ["chassis", "wheel"],
+        "errors": []
+    }
+    """
+    if not request.prompt or not request.prompt.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Поле 'prompt' обязательно для заполнения"
+        )
+    
+    try:
+        # Генерируем спецификацию
+        spec_result = generate_spec_with_agent_sync(request.prompt.strip())
+        
+        if not spec_result["success"]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Ошибка генерации спецификации: {spec_result.get('message', 'Неизвестная ошибка')}"
+            )
+        
+        # Собираем робота
+        from tools.tool_assemble_robot import AssembleRobotRequest as AssembleRequest
+        from tools.tool_assemble_robot import assemble_robot
+        
+        assemble_request = AssembleRequest(
+            specification=spec_result["specification"],
+            document_name=request.document_name,
+            output_path=request.output_path
+        )
+        
+        assemble_result = assemble_robot(assemble_request)
+        
+        return {
+            "success": assemble_result.success,
+            "message": assemble_result.message,
+            "document_path": assemble_result.document_path,
+            "components_created": assemble_result.components_created,
+            "errors": assemble_result.errors,
+            "specification": spec_result["specification"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при сборке робота: {str(e)}"
         )
 
 @app.get("/api/cad/create-test-shape")
@@ -442,5 +518,6 @@ if __name__ == "__main__":
     print("Создать тестовый цилиндр: http://localhost:8001/api/cad/create-test-shape?shape_type=cylinder&size=10&size=25&file_name=my_cylinder.FCStd")
     print("Статус MCP: http://localhost:8001/api/mcp/status")
     print("Генерация JSON-спеки: http://localhost:8001/api/ai/generate-spec (POST)")
+    print("Генерация и сборка робота: http://localhost:8001/api/ai/assemble-robot (POST)")
     print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8001)
