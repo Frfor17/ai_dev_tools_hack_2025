@@ -1,3 +1,4 @@
+# main.py
 from fastapi import FastAPI, HTTPException
 import httpx
 import uvicorn
@@ -8,13 +9,13 @@ import threading
 import math
 from dotenv import load_dotenv
 import os
+import json
+
 load_dotenv()
 
-api_key = '821aa690d020da50bdb5919c1b49afd9'
 
-
-# Импорт всех инструментов для регистрации
-from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape,tool_test_shape
+# Импорт всех инструментов для регистрации MCP
+from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape, tool_test_shape
 
 app = FastAPI(title="CAD API Gateway")
 
@@ -23,7 +24,7 @@ async def get_mcp_status():
     """Получить статус MCP сервера."""
     return {
         "status": "running",
-        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document", "create_complex_shape","tool_test_shape"],
+        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document", "create_complex_shape", "create_test_shape"],
         "description": "CAD MCP Server for FreeCAD operations"
     }
 
@@ -81,20 +82,6 @@ async def create_shape(
             "y": y,
             "z": z
         }
-    }
-
-@app.get("/")
-async def root():
-    return {
-        "message": "FreeCAD API Gateway",
-        "endpoints": {
-            "documents": "/api/cad/documents",
-            "create_shape": "/api/cad/create-shape?shape_type=cube&size=10",
-            "create_cube_15mm": "/api/cad/create-shape?shape_type=cube&size=15",
-            "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
-            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10"
-        },
-        "notes": "Размер указывается в миллиметрах"
     }
 
 @app.get("/api/cad/create-complex-shape")
@@ -263,28 +250,6 @@ async def create_complex_shape(
             detail=f"Ошибка создания сложной фигуры: {str(e)}"
         )
 
-@app.get("/")
-async def root():
-    return {
-        "message": "FreeCAD API Gateway",
-        "endpoints": {
-            "documents": "/api/cad/documents",
-            "create_shape": "/api/cad/create-shape?shape_type=cube&size=10",
-            "create_cube_15mm": "/api/cad/create-shape?shape_type=cube&size=15",
-            "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
-            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10",
-            "create_complex_shape": "/api/cad/create-complex-shape?shape_type=star&num_points=5&inner_radius=10&outer_radius=20&height=5",
-            "open_document": "/api/cad/open-document?file_path=test.FCStd",
-            "save_document": "/api/cad/save-document?file_path=test.FCStd",
-            "close_document": "/api/cad/close-document",
-            "create_test_shape": "/api/cad/create-test-shape?shape_type=cube&size=10&file_name=my_test.FCStd",
-            "create_test_cube": "/api/cad/create-test-shape?shape_type=cube&size=15",
-            "create_test_sphere": "/api/cad/create-test-shape?shape_type=sphere&size=20",
-            "create_test_cylinder": "/api/cad/create-test-shape?shape_type=cylinder&size=10&size=30",
-        },
-        "notes": "Размер указывается в миллиметрах. Для test_shape можно указать имя файла или оно будет сгенерировано автоматически"
-    }
-
 @app.get("/api/cad/open-document")
 async def open_document(file_path: str):
     if not file_path:
@@ -382,288 +347,33 @@ async def create_test_shape_endpoint(
             status_code=500,
             detail=f"Ошибка при создании тестовой фигуры: {str(e)}"
         )
-    
-@app.post("/api/agent/query")
-async def agent_query(query_request: dict):
-    """
-    Обработка запроса через AI агента с выполнением команд.
-    
-    Пример тела запроса:
-    {
-        "query": "Создай куб размером 20мм"
-    }
-    """
-    try:
-        query = query_request.get("query", "").strip()
-        
-        if not query:
-            return {
-                "success": False,
-                "error": "Запрос не может быть пустым"
-            }
-        
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        
-        if not api_key:
-            return {
-                "success": False,
-                "error": "OPENROUTER_API_KEY не найден в .env"
-            }
-        
-        # 1. Получаем ответ от LLM
-        system_prompt = """Ты - AI ассистент для CAD системы FreeCAD.
 
-        Доступные команды и их параметры:
-        1. create_test_shape(shape_type='cube', size=20, file_name=None) - создать тестовую фигуру
-        2. get_mcp_status() - проверить статус MCP сервера
-        3. get_documents() - получить список документов
-        4. open_document(file_path='test.FCStd') - открыть документ
-        5. create_shape(shape_type='cube', size=20, x=0, y=0, z=0) - создать фигуру в документе
-        6. save_document(file_path=None) - сохранить документ
-        7. close_document() - закрыть документ
-
-        ВАЖНО: При создании фигур (create_shape) всегда сначала открывай документ, 
-        затем создавай фигуру, затем сохраняй и закрывай документ.
-        
-        Ответь ТОЛЬКО в формате JSON:
-        {{
-            "command": "имя_команды",
-            "parameters": {{
-                "param1": "value1",
-                "param2": "value2"
-            }},
-            "explanation": "Краткое объяснение на русском",
-            "requires_document": true/false
-        }}
-
-        Если команда не требует параметров, оставь "parameters": {{}}.
-        Поле "requires_document": true для команд, требующих открытого документа."""
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:8001"
-        }
-        
-        payload = {
-            "model": "meta-llama/llama-3.2-3b-instruct:free",
-            "messages": [
-                {"role": "system", "content": system_prompt.format(query=query)},
-                {"role": "user", "content": query}
-            ],
-            "max_tokens": 500,
-            "temperature": 0.3
-        }
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
-            
-            if response.status_code != 200:
-                return {
-                    "success": False,
-                    "error": f"OpenRouter error: {response.status_code}",
-                    "details": response.text[:200]
-                }
-            
-            data = response.json()
-            llm_response = data["choices"][0]["message"]["content"]
-            
-            # 2. Пытаемся распарсить JSON ответ LLM
-            import json as json_lib
-            try:
-                # Убираем возможные лишние символы
-                cleaned_response = llm_response.strip()
-                if cleaned_response.startswith("```json"):
-                    cleaned_response = cleaned_response[7:-3].strip()
-                elif cleaned_response.startswith("```"):
-                    cleaned_response = cleaned_response[3:-3].strip()
-                
-                command_data = json_lib.loads(cleaned_response)
-                command = command_data.get("command")
-                parameters = command_data.get("parameters", {})
-                explanation = command_data.get("explanation", "")
-                requires_document = command_data.get("requires_document", False)
-                
-            except (json_lib.JSONDecodeError, KeyError):
-                # Если не удалось распарсить, возвращаем только текст
-                return {
-                    "success": True,
-                    "query": query,
-                    "result": llm_response,
-                    "executed": False,
-                    "note": "Не удалось распознать команду для выполнения"
-                }
-            
-            # 3. Выполняем команду через MCP сервер
-            mcp_results = []
-            
-            # Функция для работы с документами
-            async def handle_document_operations(command_type, cmd_params):
-                """Обработка команд, требующих работы с документом"""
-                import uuid
-                
-                # Определяем имя файла
-                file_name = parameters.get("file_name", f"auto_{command_type}_{uuid.uuid4().hex[:8]}.FCStd")
-                
-                # Шаг 1: Открываем документ
-                open_result = await client.get(
-                    "http://localhost:8001/api/cad/open-document",
-                    params={"file_path": file_name}
-                )
-                mcp_results.append({"open_document": open_result.json()})
-                
-                # Шаг 2: Выполняем команду создания
-                if command_type == "create_shape":
-                    create_result = await client.get(
-                        "http://localhost:8001/api/cad/create-shape",
-                        params=cmd_params
-                    )
-                    mcp_results.append({"create_shape": create_result.json()})
-                elif command_type == "create_test_shape":
-                    create_result = await client.get(
-                        "http://localhost:8001/api/cad/create-test-shape",
-                        params=cmd_params
-                    )
-                    mcp_results.append({"create_test_shape": create_result.json()})
-                
-                # Шаг 3: Сохраняем документ
-                save_result = await client.get(
-                    "http://localhost:8001/api/cad/save-document",
-                    params={"file_path": file_name}
-                )
-                mcp_results.append({"save_document": save_result.json()})
-                
-                # Шаг 4: Закрываем документ
-                close_result = await client.get("http://localhost:8001/api/cad/close-document")
-                mcp_results.append({"close_document": close_result.json()})
-                
-                return file_name
-            
-            if command == "create_test_shape":
-                # Проверяем параметры
-                shape_type = parameters.get("shape_type", "cube")
-                size = parameters.get("size", 20)
-                file_name = parameters.get("file_name")
-                
-                mcp_params = {"shape_type": shape_type, "size": size}
-                if file_name:
-                    mcp_params["file_name"] = file_name
-                
-                file_used = await handle_document_operations("create_test_shape", mcp_params)
-                
-            elif command == "get_mcp_status":
-                mcp_response = await client.get("http://localhost:8001/api/mcp/status")
-                mcp_results.append(mcp_response.json())
-                
-            elif command == "get_documents":
-                mcp_response = await client.get("http://localhost:8001/api/cad/documents")
-                mcp_results.append(mcp_response.json())
-                
-            elif command == "open_document":
-                file_path = parameters.get("file_path", "test.FCStd")
-                mcp_response = await client.get(
-                    "http://localhost:8001/api/cad/open-document",
-                    params={"file_path": file_path}
-                )
-                mcp_results.append(mcp_response.json())
-                
-            elif command == "create_shape" or requires_document:
-                shape_type = parameters.get("shape_type", "cube")
-                size = parameters.get("size", 20)
-                x = parameters.get("x", 0)
-                y = parameters.get("y", 0)
-                z = parameters.get("z", 0)
-                
-                cmd_params = {
-                    "shape_type": shape_type,
-                    "size": size,
-                    "x": x,
-                    "y": y,
-                    "z": z
-                }
-                
-                file_used = await handle_document_operations("create_shape", cmd_params)
-                
-            elif command == "save_document":
-                file_path = parameters.get("file_path")
-                mcp_params = {}
-                if file_path:
-                    mcp_params["file_path"] = file_path
-                mcp_response = await client.get(
-                    "http://localhost:8001/api/cad/save-document",
-                    params=mcp_params
-                )
-                mcp_results.append(mcp_response.json())
-                
-            elif command == "close_document":
-                mcp_response = await client.get("http://localhost:8001/api/cad/close-document")
-                mcp_results.append(mcp_response.json())
-                
-            else:
-                return {
-                    "success": True,
-                    "query": query,
-                    "result": llm_response,
-                    "executed": False,
-                    "note": f"Команда '{command}' не поддерживается для автоматического выполнения"
-                }
-            
-            # 4. Формируем финальный ответ
-            result_data = {
-                "success": True,
-                "query": query,
-                "llm_response": llm_response,
-                "command": command,
-                "parameters": parameters,
-                "explanation": explanation,
-                "executed": True,
-                "mcp_results": mcp_results,
-            }
-            
-            # Добавляем информацию о файле, если он был создан
-            if command in ["create_shape", "create_test_shape"] or requires_document:
-                result_data["file_created"] = file_used if 'file_used' in locals() else "Неизвестный файл"
-                result_data["full_response"] = (
-                    f"{explanation}\n\n"
-                    f"Файл: {file_used if 'file_used' in locals() else 'Неизвестный'}\n"
-                    f"Результат выполнения:\n{mcp_results}"
-                )
-            else:
-                result_data["full_response"] = f"{explanation}\n\nРезультат выполнения:\n{mcp_results}"
-            
-            return result_data
-            
-    except Exception as e:
-        import traceback
-        return {
-            "success": False,
-            "error": f"Ошибка обработки: {str(e)}",
-            "traceback": traceback.format_exc(),
-            "query": query_request.get("query", "")
-        }
-@app.get("/api/agent/help")
-async def agent_help():
-    """Получить справку по использованию агента."""
+@app.get("/")
+async def root():
     return {
-        "endpoint": "/api/agent/query",
-        "method": "POST",
-        "description": "Обработка запросов на естественном языке через AI агента",
-        "example_request": {
-            "query": "Создай куб размером 20мм в новом файле test_cube.FCStd"
+        "message": "FreeCAD API Gateway",
+        "endpoints": {
+            "documents": "/api/cad/documents",
+            "create_shape": "/api/cad/create-shape?shape_type=cube&size=10",
+            "create_cube_15mm": "/api/cad/create-shape?shape_type=cube&size=15",
+            "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
+            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10",
+            "create_complex_shape": "/api/cad/create-complex-shape?shape_type=star&num_points=5&inner_radius=10&outer_radius=20&height=5",
+            "open_document": "/api/cad/open-document?file_path=test.FCStd",
+            "save_document": "/api/cad/save-document?file_path=test.FCStd",
+            "close_document": "/api/cad/close-document",
+            "create_test_shape": "/api/cad/create-test-shape?shape_type=cube&size=10&file_name=my_test.FCStd",
+            "create_test_cube": "/api/cad/create-test-shape?shape_type=cube&size=15",
+            "create_test_sphere": "/api/cad/create-test-shape?shape_type=sphere&size=20",
+            "create_test_cylinder": "/api/cad/create-test-shape?shape_type=cylinder&size=10&size=30",
+            "agent_query": "/api/agent/query (POST)",
+            "agent_status": "/api/agent/status",
+            "agent_help": "/api/agent/help"
         },
-        "available_operations": [
-            "Создание простых фигур (куб, сфера, цилиндр)",
-            "Создание сложных фигур (звезда, шестеренка, тор)",
-            "Открытие/сохранение/закрытие документов",
-            "Проверка статуса системы",
-            "Получение списка документов"
-        ]
+        "notes": "Размер указывается в миллиметрах. Для test_shape можно указать имя файла или оно будет сгенерировано автоматически"
     }
+
+# УДАЛЕНО: старый эндпоинт /api/agent/query (перенесен в agent_router)
 
 if __name__ == "__main__":
     # Запуск MCP сервера в отдельном потоке
@@ -673,17 +383,15 @@ if __name__ == "__main__":
     print("=" * 60)
     print("FreeCAD FastAPI Server запущен")
     print("MCP Server запущен на порту 8000")
+    print("AI Agent (LangChain) инициализирован")
     print("=" * 60)
     print("Swagger UI: http://localhost:8001/docs")
     print("Тест документов: http://localhost:8001/api/cad/documents")
     print("Создать куб 15мм: http://localhost:8001/api/cad/create-shape?shape_type=cube&size=15")
-    print("Создать сферу 20мм: http://localhost:8001/api/cad/create-shape?shape_type=sphere&size=20")
-    print("Создать тор: http://localhost:8001/api/cad/create-complex-shape?shape_type=torus&major_radius=30&minor_radius=10")
-    print("Создать звезду: http://localhost:8001/api/cad/create-complex-shape?shape_type=star&num_points=5&inner_radius=10&outer_radius=20&height=5")
-    print("Создать шестеренку: http://localhost:8001/api/cad/create-complex-shape?shape_type=gear&teeth=12&module=2&outer_radius=20&height=5")
     print("Создать тестовый куб: http://localhost:8001/api/cad/create-test-shape?shape_type=cube&size=15")
-    print("Создать тестовую сферу: http://localhost:8001/api/cad/create-test-shape?shape_type=sphere&size=20&x=10&y=10&z=10")
-    print("Создать тестовый цилиндр: http://localhost:8001/api/cad/create-test-shape?shape_type=cylinder&size=10&size=25&file_name=my_cylinder.FCStd")
-    print("Статус MCP: http://localhost:8001/api/mcp/status")
+    print("AI Agent запрос: POST http://localhost:8001/api/agent/query")
+    print("AI Agent статус: GET http://localhost:8001/api/agent/status")
+    print("Пример запроса к агенту:")
+    print('curl -X POST http://localhost:8001/api/agent/query -H "Content-Type: application/json" -d \'{"query": "Создай куб размером 20мм"}\'')
     print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8001)

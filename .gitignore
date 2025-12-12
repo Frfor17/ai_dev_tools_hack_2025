@@ -4,3 +4,4 @@ __pycache__
 .roo
 .venv
 tg_bot_config.py
+agent.log

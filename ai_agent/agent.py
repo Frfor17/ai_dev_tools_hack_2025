@@ -1,439 +1,379 @@
+# agent.py
 import os
 import json
+import time
 import logging
-import httpx
+from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain_classic.agents import AgentExecutor, create_openai_tools_agent
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_classic.memory import ConversationBufferMemory
+from langchain.tools import tool
+import httpx
 
 load_dotenv()
 
-# Конфигурация OpenRouter
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "meta-llama/llama-3.3-70b-instruct:free"
-# MCP сервер
-MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8001")
+# Конфигурация
+MODEL = os.getenv("SBER_MODEL", "Qwen/Qwen3-Next-80B-A3B-Instruct")
 
 # Настройка логирования
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('agent.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger("CADAgent")
 
-# ============ ИНСТРУМЕНТЫ (БЕЗ ИЗМЕНЕНИЙ) ============
-def tool_open_document(file_path: str) -> dict:
-    logger.info(f"Открытие документа: {file_path}")
-    try:
-        response = httpx.get(f"{MCP_SERVER_URL}/api/cad/open-document", 
-                           params={"file_path": file_path}, timeout=30.0)
-        return response.json()
-    except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        return {"error": str(e)}
+# ============ ИНИЦИАЛИЗАЦИЯ LLM С SBERCLOUD ============
+def get_llm():
+    """Инициализация LLM для SberCloud через LangChain"""
+    
+    api_key = os.getenv("API_KEY")
+    if not api_key:
+        raise ValueError("API_KEY не найден в .env файле")
+    
+    return ChatOpenAI(
+        base_url="https://foundation-models.api.cloud.ru/v1",
+        api_key=api_key,
+        model=MODEL,
+        temperature=0.3,
+        max_tokens=2000,
+        timeout=60.0,
+        max_retries=2,
+        presence_penalty=0,
+        frequency_penalty=0.1,
+        model_kwargs={}
+    )
 
-def tool_save_document(file_path: str = None) -> dict:
-    logger.info(f"Сохранение документа: {file_path or 'текущий'}")
+# ============ ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ СОЗДАНИЯ ФИГУР ============
+def _create_shape_http(shape_type: str, size: float, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> str:
+    """Внутренняя функция для создания фигуры через FastAPI."""
+    try:
+        params = {
+            "shape_type": shape_type,
+            "size": size,
+            "x": x,
+            "y": y,
+            "z": z
+        }
+        response = httpx.get(
+            "http://localhost:8001/api/cad/create-shape",
+            params=params,
+            timeout=30.0
+        )
+        response.raise_for_status()
+        return json.dumps(response.json(), ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        error_msg = f"Ошибка создания {shape_type}: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg})
+
+# ============ ИНСТРУМЕНТЫ LANGCHAIN ============
+@tool
+def get_health() -> str:
+    """Проверить здоровье системы через FastAPI."""
+    logger.info("Проверка здоровья системы через FastAPI")
+    
+    try:
+        # Проверяем FastAPI
+        fastapi_resp = httpx.get("http://localhost:8001/", timeout=5.0)
+        fastapi_ok = fastapi_resp.status_code == 200
+        
+        # Проверяем MCP через FastAPI эндпоинт
+        mcp_resp = httpx.get("http://localhost:8001/api/mcp/status", timeout=5.0)
+        mcp_ok = mcp_resp.status_code == 200
+        
+        # Проверяем CAD через FastAPI
+        cad_resp = httpx.get("http://localhost:8001/api/cad/documents", timeout=5.0)
+        cad_ok = cad_resp.status_code == 200
+        
+        result = {
+            "fastapi_server": fastapi_ok,
+            "mcp_server": mcp_ok,
+            "cad_system": cad_ok,
+            "agent": True,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        return json.dumps(result, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        error_msg = f"Ошибка проверки здоровья: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg})
+
+@tool
+def open_document(file_path: str) -> str:
+    """Открыть или создать документ через FastAPI."""
+    logger.info(f"Открытие документа через FastAPI: {file_path}")
+    
+    try:
+        response = httpx.get(
+            "http://localhost:8001/api/cad/open-document",
+            params={"file_path": file_path},
+            timeout=30.0
+        )
+        response.raise_for_status()
+        return json.dumps(response.json(), ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        error_msg = f"Ошибка открытия документа: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg})
+
+@tool
+def save_document(file_path: Optional[str] = None) -> str:
+    """Сохранить текущий документ через FastAPI."""
+    logger.info(f"Сохранение документа через FastAPI: {file_path or 'текущий'}")
+    
     try:
         params = {"file_path": file_path} if file_path else {}
-        response = httpx.get(f"{MCP_SERVER_URL}/api/cad/save-document", 
-                           params=params, timeout=30.0)
-        return response.json()
-    except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        return {"error": str(e)}
-
-def tool_close_document() -> dict:
-    logger.info("Закрытие документа")
-    try:
-        response = httpx.get(f"{MCP_SERVER_URL}/api/cad/close-document", timeout=30.0)
-        return response.json()
-    except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        return {"error": str(e)}
-
-def tool_create_shape(shape_type: str, size: float, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> dict:
-    logger.info(f"Создание фигуры: {shape_type}, размер: {size}")
-    try:
-        params = {"shape_type": shape_type, "size": size, "x": x, "y": y, "z": z}
-        response = httpx.get(f"{MCP_SERVER_URL}/api/cad/create-shape", params=params, timeout=30.0)
-        return response.json()
-    except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        return {"error": str(e)}
-
-def tool_create_complex_shape(
-    shape_type: str,
-    num_points: int = None,
-    inner_radius: float = None,
-    outer_radius: float = None,
-    height: float = None,
-    teeth: int = None,
-    module: float = None,
-    major_radius: float = None,
-    minor_radius: float = None
-) -> dict:
-    logger.info(f"Создание сложной фигуры: {shape_type}")
-    try:
-        params = {k: v for k, v in locals().items() if v is not None and k != 'self'}
-        response = httpx.get(f"{MCP_SERVER_URL}/api/cad/create-complex-shape", params=params, timeout=30.0)
-        return response.json()
-    except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        return {"error": str(e)}
-
-def tool_create_test_shape(
-    shape_type: str = "cube",
-    size: float = 10.0,
-    x: float = 0.0,
-    y: float = 0.0,
-    z: float = 0.0,
-    file_name: str = None
-) -> dict:
-    logger.info(f"Создание тестовой фигуры: {shape_type}")
-    try:
-        params = {k: v for k, v in locals().items() if v is not None and k != 'self'}
-        response = httpx.get(f"{MCP_SERVER_URL}/api/cad/create-test-shape", params=params, timeout=30.0)
-        return response.json()
-    except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        return {"error": str(e)}
-
-def tool_get_documents() -> dict:
-    logger.info("Получение списка документов")
-    try:
-        response = httpx.get(f"{MCP_SERVER_URL}/api/cad/documents", timeout=30.0)
-        return response.json()
-    except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        return {"error": str(e)}
-
-def tool_get_mcp_status() -> dict:
-    logger.info("Получение статуса MCP сервера")
-    try:
-        response = httpx.get(f"{MCP_SERVER_URL}/api/mcp/status", timeout=30.0)
-        return response.json()
-    except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        return {"error": str(e)}
-
-# ============ СХЕМЫ ИНСТРУМЕНТОВ ============
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "open_document",
-            "description": "Открыть или создать документ FreeCAD по пути.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {"type": "string", "description": "Путь к файлу .FCStd"}
-                },
-                "required": ["file_path"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "save_document",
-            "description": "Сохранить текущий документ, опционально по новому пути.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {"type": "string", "description": "Новый путь (опционально)"}
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "close_document",
-            "description": "Закрыть текущий документ.",
-            "parameters": {"type": "object", "properties": {}}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_shape",
-            "description": "Создать простую фигуру в текущем документе.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "shape_type": {"type": "string", "enum": ["cube", "sphere", "cylinder"]},
-                    "size": {"type": "number"},
-                    "x": {"type": "number", "default": 0.0},
-                    "y": {"type": "number", "default": 0.0},
-                    "z": {"type": "number", "default": 0.0}
-                },
-                "required": ["shape_type", "size"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_complex_shape",
-            "description": "Создать сложную фигуру в текущем документе.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "shape_type": {"type": "string", "enum": ["star", "gear", "torus"]},
-                    "num_points": {"type": "integer", "description": "Для star"},
-                    "inner_radius": {"type": "number", "description": "Для star"},
-                    "outer_radius": {"type": "number", "description": "Для star/gear"},
-                    "height": {"type": "number", "description": "Для star/gear"},
-                    "teeth": {"type": "integer", "description": "Для gear"},
-                    "module": {"type": "number", "description": "Для gear"},
-                    "major_radius": {"type": "number", "description": "Для torus"},
-                    "minor_radius": {"type": "number", "description": "Для torus"}
-                },
-                "required": ["shape_type"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_test_shape",
-            "description": "Создать тестовую фигуру и сохранить в файл.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "shape_type": {"type": "string", "enum": ["cube", "sphere", "cylinder"]},
-                    "size": {"type": "number"},
-                    "x": {"type": "number", "default": 0.0},
-                    "y": {"type": "number", "default": 0.0},
-                    "z": {"type": "number", "default": 0.0},
-                    "file_name": {"type": "string"}
-                },
-                "required": ["shape_type", "size"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_documents",
-            "description": "Получить список документов.",
-            "parameters": {"type": "object", "properties": {}}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_mcp_status",
-            "description": "Получить статус MCP сервера.",
-            "parameters": {"type": "object", "properties": {}}
-        }
-    }
-]
-
-TOOL_MAP = {
-    "open_document": tool_open_document,
-    "save_document": tool_save_document,
-    "close_document": tool_close_document,
-    "create_shape": tool_create_shape,
-    "create_complex_shape": tool_create_complex_shape,
-    "create_test_shape": tool_create_test_shape,
-    "get_documents": tool_get_documents,
-    "get_mcp_status": tool_get_mcp_status
-}
-
-# ============ АГЕНТ С OPENROUTER ============
-class CADAgent:
-    def __init__(self, api_key: str = None, model: str = None):
-        self.api_key = api_key or OPENROUTER_API_KEY
-        self.model = model or MODEL
-        self.api_url = OPENROUTER_URL
+        response = httpx.get(
+            "http://localhost:8001/api/cad/save-document",
+            params=params,
+            timeout=30.0
+        )
+        response.raise_for_status()
+        return json.dumps(response.json(), ensure_ascii=False, indent=2)
         
-        if not self.api_key:
-            raise ValueError("OPENROUTER_API_KEY не найден. Установите в .env")
-        
-        logger.info(f"Агент инициализирован с OpenRouter")
-        logger.info(f"Модель: {self.model}")
+    except Exception as e:
+        error_msg = f"Ошибка сохранения документа: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg})
+
+@tool
+def close_document() -> str:
+    """Закрыть текущий документ через FastAPI."""
+    logger.info("Закрытие документа через FastAPI")
     
-    def _call_llm(self, messages, tools=None):
-        """Вызов LLM через OpenRouter API"""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:8001",  # Для OpenRouter
-            "X-Title": "CAD Agent"  # Для OpenRouter
-        }
+    try:
+        response = httpx.get(
+            "http://localhost:8001/api/cad/close-document",
+            timeout=30.0
+        )
+        response.raise_for_status()
+        return json.dumps(response.json(), ensure_ascii=False, indent=2)
         
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": 2000,
-            "temperature": 0.3,
-        }
-        
-        if tools:
-            payload["tools"] = tools
-        
-        try:
-            logger.debug(f"Отправка запроса к LLM")
-            response = httpx.post(self.api_url, headers=headers, json=payload, timeout=60.0)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ошибка LLM: {e}")
-            raise
+    except Exception as e:
+        error_msg = f"Ошибка закрытия документа: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg})
+
+@tool
+def create_shape(shape_type: str, size: float, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> str:
+    """Создать фигуру через FastAPI."""
+    logger.info(f"Создание фигуры через FastAPI: {shape_type}")
+    return _create_shape_http(shape_type, size, x, y, z)
+
+@tool
+def create_cube(size: float = 10.0, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> str:
+    """Создать куб через FastAPI."""
+    logger.info(f"Создание куба через FastAPI, размер: {size}")
+    return _create_shape_http("cube", size, x, y, z)
+
+@tool
+def create_sphere(size: float = 10.0, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> str:
+    """Создать сферу через FastAPI."""
+    logger.info(f"Создание сферы через FastAPI, диаметр: {size}")
+    return _create_shape_http("sphere", size, x, y, z)
+
+@tool
+def create_cylinder(size: float = 10.0, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> str:
+    """Создать цилиндр через FastAPI."""
+    logger.info(f"Создание цилиндра через FastAPI, диаметр: {size}")
+    return _create_shape_http("cylinder", size, x, y, z)
+
+@tool 
+def get_documents() -> str:
+    """Получить список документов через FastAPI."""
+    logger.info("Получение документов через FastAPI")
     
-    def process_query(self, user_query: str) -> str:
-        """Обработка запроса пользователя"""
-        logger.info(f"Обработка запроса: {user_query}")
+    try:
+        response = httpx.get(
+            "http://localhost:8001/api/cad/documents",
+            timeout=30.0
+        )
+        response.raise_for_status()
+        return json.dumps(response.json(), ensure_ascii=False, indent=2)
         
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Ты - AI агент для работы с CAD системой FreeCAD через MCP сервер. "
-                    "Используй доступные инструменты для выполнения задач. "
-                    "Для создания фигур сначала открывай документ. "
-                    "Если пользователь хочет создать фигуру без указания файла, используй create_test_shape. "
-                    "Если пользователь хочет создать фигуру в существующем файле, используй open_document → create_shape → save_document. "
-                    "Отвечай на русском языке."
-                )
-            },
-            {"role": "user", "content": user_query}
+    except Exception as e:
+        error_msg = f"Ошибка получения документов: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg})
+
+@tool
+def get_mcp_status() -> str:
+    """Получить статус MCP через FastAPI."""
+    logger.info("Получение статуса MCP через FastAPI")
+    
+    try:
+        response = httpx.get(
+            "http://localhost:8001/api/mcp/status",
+            timeout=30.0
+        )
+        response.raise_for_status()
+        return json.dumps(response.json(), ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        error_msg = f"Ошибка получения статуса MCP: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg})
+
+# ============ КЛАСС ПОЛНОЦЕННОГО АГЕНТА ============
+class FullCADAgent:
+    """Полноценный CAD агент с памятью и продвинутыми функциями"""
+    
+    def __init__(self):
+        # Проверяем наличие API ключа
+        api_key = os.getenv("API_KEY")
+        if not api_key:
+            raise ValueError("API_KEY не найден в .env. Установите API_KEY для SberCloud")
+        
+        # Инициализация LLM
+        self.llm = get_llm()
+        
+        # Сбор всех инструментов
+        self.tools = [
+            open_document,
+            save_document,
+            close_document,
+            create_shape,
+            create_cube,
+            create_sphere,
+            create_cylinder,
+            get_documents,
+            get_mcp_status,
+            get_health
         ]
         
-        max_steps = 5
-        for step in range(max_steps):
-            logger.info(f"Шаг {step + 1}/{max_steps}")
+        # Инициализация памяти
+        self.memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            return_messages=True
+        )
+        
+        # Создание промпта
+        self.prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="""Ты - профессиональный AI ассистент для CAD системы FreeCAD.
+            Используй доступные инструменты для выполнения задач. Всегда работай последовательно:
+            1. Открой документ (open_document)
+            2. Создай фигуру (create_shape, create_cube и т.д.)
+            3. Сохрани документ (save_document)
+            4. Закрой документ (close_document)
             
-            try:
-                response_data = self._call_llm(messages, tools=TOOLS)
-                
-                if "choices" not in response_data:
-                    return "Ошибка: не получен ответ от LLM"
-                
-                message = response_data["choices"][0]["message"]
-                
-                # Проверяем tool_calls
-                if hasattr(message, 'tool_calls') and message.tool_calls:
-                    tool_calls = message.tool_calls
-                elif "tool_calls" in message:
-                    tool_calls = message["tool_calls"]
-                else:
-                    tool_calls = []
-                
-                if tool_calls:
-                    logger.info(f"LLM вызвал {len(tool_calls)} инструмент(ов)")
-                    messages.append({
-                        "role": "assistant",
-                        "content": message.get("content", ""),
-                        "tool_calls": tool_calls
-                    })
-                    
-                    for tool_call in tool_calls:
-                        # Извлекаем данные инструмента
-                        if hasattr(tool_call, 'function'):
-                            tool_name = tool_call.function.name
-                            tool_args = json.loads(tool_call.function.arguments)
-                        else:
-                            tool_name = tool_call["function"]["name"]
-                            tool_args = json.loads(tool_call["function"]["arguments"])
-                        
-                        logger.info(f"Выполнение: {tool_name}")
-                        
-                        if tool_name in TOOL_MAP:
-                            try:
-                                tool_result = TOOL_MAP[tool_name](**tool_args)
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.get("id", ""),
-                                    "name": tool_name,
-                                    "content": json.dumps(tool_result, ensure_ascii=False)
-                                })
-                            except Exception as e:
-                                logger.error(f"Ошибка инструмента {tool_name}: {e}")
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.get("id", ""),
-                                    "name": tool_name,
-                                    "content": json.dumps({"error": str(e)})
-                                })
-                        else:
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call.get("id", ""),
-                                "name": tool_name,
-                                "content": json.dumps({"error": "Инструмент не найден"})
-                            })
-                else:
-                    return message.get("content", "Нет ответа")
-                    
-            except Exception as e:
-                logger.error(f"Ошибка на шаге {step + 1}: {e}")
-                return f"Ошибка: {str(e)}"
+            Будь точным и профессиональным. Отвечай на русском языке.
+            
+            Примеры команд:
+            - "Создай куб 20мм" → open_document(auto_cube.FCStd) → create_cube(size=20) → save_document() → close_document()
+            - "Покажи все документы" → get_documents()
+            - "Проверь здоровье системы" → get_health()
+            """),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad")
+        ])
         
-        return "Превышено максимальное количество шагов"
-
-# ============ CLI ИНТЕРФЕЙС ============
-def main():
-    from dotenv import load_dotenv
-    load_dotenv()
-    
-    print("=" * 60)
-    print("🤖 CAD AI Agent - OpenRouter (Бесплатный)")
-    print("=" * 60)
-    
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    
-    if not api_key:
-        print("❌ OPENROUTER_API_KEY не найден в .env")
-        print("\nПолучите ключ:")
-        print("1. Зарегистрируйтесь на https://openrouter.ai")
-        print("2. В настройках создайте API ключ")
-        print("3. Добавьте в .env: OPENROUTER_API_KEY=ваш_ключ")
-        return
-    
-    try:
-        agent = CADAgent(api_key=api_key)
-        print("✅ Агент инициализирован")
-        print(f"Модель: {agent.model}")
-        print(f"API: OpenRouter (бесплатно)")
-        print("=" * 60)
+        # Создание агента
+        self.agent = create_openai_tools_agent(
+            llm=self.llm,
+            tools=self.tools,
+            prompt=self.prompt
+        )
         
-        # Тест подключения
-        print("Тест подключения...")
+        # Создание исполнителя
+        self.agent_executor = AgentExecutor(
+            agent=self.agent,
+            tools=self.tools,
+            memory=self.memory,
+            verbose=True,
+            handle_parsing_errors=True,
+            max_iterations=5
+        )
+        
+        logger.info("✅ Full CAD Agent инициализирован")
+        logger.info(f"Модель: {MODEL}")
+        logger.info(f"Инструментов: {len(self.tools)}")
+    
+    def process(self, query: str) -> Dict[str, Any]:
+        """Обработать запрос пользователя"""
+        logger.info(f"📨 Запрос: {query}")
+        
         try:
-            status = tool_get_mcp_status()
-            print(f"✅ MCP статус: OK")
+            # Запуск агента
+            result = self.agent_executor.invoke({"input": query})
+            
+            response = {
+                "success": True,
+                "query": query,
+                "response": result.get("output", "Нет ответа")
+            }
+            
+            logger.info("✅ Запрос успешно обработан")
+            return response
+            
         except Exception as e:
-            print(f"⚠️  MCP ошибка: {e}")
-        
-        print("\nПримеры запросов:")
-        print("1. Создай куб 20мм")
-        print("2. Проверь статус системы")
-        print("3. Покажи список документов")
-        print("4. Создай сферу 15мм в test.FCStd")
-        print("\nВведите 'exit' для выхода")
+            logger.error(f"❌ Ошибка обработки: {str(e)}")
+            return {
+                "success": False,
+                "query": query,
+                "error": str(e),
+                "response": f"Произошла ошибка при обработке запроса: {str(e)}"
+            }
+    
+    def clear_memory(self):
+        """Очистить память агента"""
+        self.memory.clear()
+        logger.info("🧹 Память агента очищена")
+
+# ============ SINGLETON ДЛЯ ПРОЕКТА ============
+_agent_instance = None
+
+def get_agent() -> FullCADAgent:
+    """Получить глобальный экземпляр агента"""
+    global _agent_instance
+    if _agent_instance is None:
+        _agent_instance = FullCADAgent()
+    return _agent_instance
+
+# ============ ТЕСТОВЫЙ СКРИПТ ============
+if __name__ == "__main__":
+    # Инициализация агента
+    try:
+        agent = get_agent()
         print("=" * 60)
+        print("✅ CAD Agent успешно инициализирован")
+        print(f"Модель: {MODEL}")
+        print(f"Инструментов: {len(agent.tools)}")
+        print("=" * 60)
+        
+        # Тестовый запрос
+        test_query = "Проверь здоровье системы"
+        print(f"Тестовый запрос: {test_query}")
+        result = agent.process(test_query)
+        print(f"Ответ: {result['response']}")
+        print("=" * 60)
+        
+        # Интерактивный режим
+        print("Чат с агентом (нажмите Ctrl+C для выхода)")
+        print("-" * 50)
         
         while True:
-            query = input("\n💬 Ваш запрос: ").strip()
-            
-            if query.lower() in ['exit', 'quit']:
-                print("👋 Выход...")
-                break
-            
-            if not query:
+            user_input = input("Вы: ").strip()
+            if not user_input:
                 continue
             
-            print("⏳ Обработка...")
-            try:
-                result = agent.process_query(query)
-                print(f"\n📝 Результат:\n{result}")
-            except Exception as e:
-                print(f"\n❌ Ошибка: {e}")
-                
+            result = agent.process(user_input)
+            print(f"🤖 Агент: {result['response']}\n")
+            
     except Exception as e:
-        print(f"❌ Ошибка инициализации: {e}")
-
-if __name__ == "__main__":
-    main()
+        print(f"❌ Ошибка инициализации: {str(e)}")
+        print("Убедитесь что:")
+        print("1. Установлены переменные окружения в .env файле")
+        print("2. API_KEY указан для SberCloud")
+        print("3. FastAPI сервер запущен (python main.py)")
