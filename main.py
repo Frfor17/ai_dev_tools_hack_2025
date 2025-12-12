@@ -10,6 +10,8 @@ import math
 from dotenv import load_dotenv
 import os
 import json
+from ai_agent.agent import create_agent_router
+
 
 load_dotenv()
 
@@ -18,6 +20,9 @@ load_dotenv()
 from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape, tool_test_shape
 
 app = FastAPI(title="CAD API Gateway")
+
+agent_router = create_agent_router()
+app.include_router(agent_router)
 
 @app.get("/api/mcp/status")
 async def get_mcp_status():
@@ -351,29 +356,51 @@ async def create_test_shape_endpoint(
 @app.get("/")
 async def root():
     return {
-        "message": "FreeCAD API Gateway",
+        "message": "FreeCAD API Gateway с AI Agent",
+        "status": "running",
+        "api_version": "1.0",
         "endpoints": {
-            "documents": "/api/cad/documents",
-            "create_shape": "/api/cad/create-shape?shape_type=cube&size=10",
-            "create_cube_15mm": "/api/cad/create-shape?shape_type=cube&size=15",
-            "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
-            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10",
-            "create_complex_shape": "/api/cad/create-complex-shape?shape_type=star&num_points=5&inner_radius=10&outer_radius=20&height=5",
-            "open_document": "/api/cad/open-document?file_path=test.FCStd",
-            "save_document": "/api/cad/save-document?file_path=test.FCStd",
-            "close_document": "/api/cad/close-document",
-            "create_test_shape": "/api/cad/create-test-shape?shape_type=cube&size=10&file_name=my_test.FCStd",
-            "create_test_cube": "/api/cad/create-test-shape?shape_type=cube&size=15",
-            "create_test_sphere": "/api/cad/create-test-shape?shape_type=sphere&size=20",
-            "create_test_cylinder": "/api/cad/create-test-shape?shape_type=cylinder&size=10&size=30",
-            "agent_query": "/api/agent/query (POST)",
-            "agent_status": "/api/agent/status",
-            "agent_help": "/api/agent/help"
+            "cad_system": {
+                "documents": "GET /api/cad/documents",
+                "create_shape": "GET /api/cad/create-shape?shape_type=cube&size=10",
+                "open_document": "GET /api/cad/open-document?file_path=test.FCStd",
+                "save_document": "GET /api/cad/save-document",
+                "close_document": "GET /api/cad/close-document"
+            },
+            "ai_agent": {
+                "query": "POST /api/agent/query",
+                "status": "GET /api/agent/status",
+                "health": "GET /api/agent/health",
+                "clear": "POST /api/agent/clear",
+                "tools": "GET /api/agent/tools",
+                "test": "POST /api/agent/test",
+                "help": "GET /api/agent/help"
+            },
+            "mcp_server": {
+                "status": "GET /api/mcp/status"
+            }
         },
-        "notes": "Размер указывается в миллиметрах. Для test_shape можно указать имя файла или оно будет сгенерировано автоматически"
+        "agent_examples": [
+            {
+                "method": "POST",
+                "url": "/api/agent/query",
+                "body": {"query": "Создай куб 20мм"},
+                "description": "Создание куба через агента"
+            },
+            {
+                "method": "GET",
+                "url": "/api/agent/health",
+                "description": "Проверка здоровья системы"
+            },
+            {
+                "method": "POST",
+                "url": "/api/agent/test",
+                "body": {},
+                "description": "Запуск всех тестов агента"
+            }
+        ],
+        "notes": "Агент использует LangChain и работает с CAD системой через FastAPI"
     }
-
-# УДАЛЕНО: старый эндпоинт /api/agent/query (перенесен в agent_router)
 
 if __name__ == "__main__":
     # Запуск MCP сервера в отдельном потоке

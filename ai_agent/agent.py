@@ -76,57 +76,93 @@ def _create_shape_http(shape_type: str, size: float, x: float = 0.0, y: float = 
 
 # ============ ИНСТРУМЕНТЫ LANGCHAIN ============
 @tool
-def get_health() -> str:
-    """Проверить здоровье системы через FastAPI."""
-    logger.info("Проверка здоровья системы через FastAPI")
-    
-    try:
-        # Проверяем FastAPI
-        fastapi_resp = httpx.get("http://localhost:8001/", timeout=5.0)
-        fastapi_ok = fastapi_resp.status_code == 200
-        
-        # Проверяем MCP через FastAPI эндпоинт
-        mcp_resp = httpx.get("http://localhost:8001/api/mcp/status", timeout=5.0)
-        mcp_ok = mcp_resp.status_code == 200
-        
-        # Проверяем CAD через FastAPI
-        cad_resp = httpx.get("http://localhost:8001/api/cad/documents", timeout=5.0)
-        cad_ok = cad_resp.status_code == 200
-        
-        result = {
-            "fastapi_server": fastapi_ok,
-            "mcp_server": mcp_ok,
-            "cad_system": cad_ok,
-            "agent": True,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        
-        return json.dumps(result, ensure_ascii=False, indent=2)
-        
-    except Exception as e:
-        error_msg = f"Ошибка проверки здоровья: {str(e)}"
-        logger.error(error_msg)
-        return json.dumps({"error": error_msg})
-
-@tool
 def open_document(file_path: str) -> str:
     """Открыть или создать документ через FastAPI."""
     logger.info(f"Открытие документа через FastAPI: {file_path}")
     
     try:
-        response = httpx.get(
-            "http://localhost:8001/api/cad/open-document",
-            params={"file_path": file_path},
-            timeout=30.0
-        )
-        response.raise_for_status()
-        return json.dumps(response.json(), ensure_ascii=False, indent=2)
-        
+        with httpx.Client(timeout=60.0) as client:  # Увеличили до 60 секунд
+            response = client.get(
+                "http://localhost:8001/api/cad/open-document",
+                params={"file_path": file_path}
+            )
+            response.raise_for_status()
+            return json.dumps(response.json(), ensure_ascii=False, indent=2)
+            
+    except httpx.TimeoutException:
+        error_msg = "Таймаут при открытии документа (60 сек). FreeCAD может быть занят."
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg, "advice": "Попробуйте через несколько секунд"})
     except Exception as e:
         error_msg = f"Ошибка открытия документа: {str(e)}"
         logger.error(error_msg)
         return json.dumps({"error": error_msg})
 
+@tool
+def create_shape(shape_type: str, size: float, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> str:
+    """Создать фигуру через FastAPI."""
+    logger.info(f"Создание фигуры через FastAPI: {shape_type}")
+    
+    try:
+        with httpx.Client(timeout=45.0) as client:  # Увеличили до 45 секунд
+            params = {
+                "shape_type": shape_type,
+                "size": size,
+                "x": x,
+                "y": y,
+                "z": z
+            }
+            response = client.get(
+                "http://localhost:8001/api/cad/create-shape",
+                params=params
+            )
+            response.raise_for_status()
+            return json.dumps(response.json(), ensure_ascii=False, indent=2)
+            
+    except httpx.TimeoutException:
+        error_msg = "Таймаут при создании фигуры (45 сек)."
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg})
+    except Exception as e:
+        error_msg = f"Ошибка создания фигуры: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg})
+
+@tool
+def get_health() -> str:
+    """Проверить здоровье системы через FastAPI."""
+    logger.info("Проверка здоровья системы через FastAPI")
+    
+    try:
+        # Проверяем только быстрые эндпоинты
+        with httpx.Client(timeout=10.0) as client:
+            # Проверяем FastAPI (корневой эндпоинт должен быть быстрым)
+            fastapi_resp = client.get("http://localhost:8001/")
+            fastapi_ok = fastapi_resp.status_code == 200
+            
+            # Проверяем MCP статус через FastAPI
+            mcp_resp = client.get("http://localhost:8001/api/mcp/status")
+            mcp_ok = mcp_resp.status_code == 200
+            
+            # Не проверяем CAD документы - это может быть медленно
+            
+            result = {
+                "fastapi_server": fastapi_ok,
+                "mcp_server": mcp_ok,
+                "cad_system": "not_checked",  # Не проверяем, чтобы избежать таймаута
+                "agent": True,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "note": "CAD система не проверена для ускорения"
+            }
+            
+            return json.dumps(result, ensure_ascii=False, indent=2)
+            
+    except Exception as e:
+        error_msg = f"Ошибка проверки здоровья: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"error": error_msg, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")})
+    
+    
 @tool
 def save_document(file_path: Optional[str] = None) -> str:
     """Сохранить текущий документ через FastAPI."""
@@ -225,6 +261,7 @@ def get_mcp_status() -> str:
         logger.error(error_msg)
         return json.dumps({"error": error_msg})
 
+
 # ============ КЛАСС ПОЛНОЦЕННОГО АГЕНТА ============
 class FullCADAgent:
     """Полноценный CAD агент с памятью и продвинутыми функциями"""
@@ -261,19 +298,24 @@ class FullCADAgent:
         # Создание промпта
         self.prompt = ChatPromptTemplate.from_messages([
             SystemMessage(content="""Ты - профессиональный AI ассистент для CAD системы FreeCAD.
-            Используй доступные инструменты для выполнения задач. Всегда работай последовательно:
-            1. Открой документ (open_document)
-            2. Создай фигуру (create_shape, create_cube и т.д.)
-            3. Сохрани документ (save_document)
-            4. Закрой документ (close_document)
-            
-            Будь точным и профессиональным. Отвечай на русском языке.
-            
-            Примеры команд:
-            - "Создай куб 20мм" → open_document(auto_cube.FCStd) → create_cube(size=20) → save_document() → close_document()
-            - "Покажи все документы" → get_documents()
-            - "Проверь здоровье системы" → get_health()
-            """),
+
+            ВАЖНО: Операции с FreeCAD могут занимать время (до 60 секунд). Будь терпелив.
+
+            ПРАВИЛА РАБОТЫ:
+            1. Всегда начинай с открытия документа: open_document("имя_файла.FCStd")
+            2. Затем создавай фигуры: create_cube(size=20), create_sphere(size=15) и т.д.
+            3. После создания фигур сохрани документ: save_document()
+            4. В конце закрой документ: close_document()
+            5. Если операция занимает слишком много времени, предложи пользователю подождать
+
+            ПРИМЕРЫ:
+            - "Создай куб 20мм" → open_document("cube_20mm.FCStd") → create_cube(size=20) → save_document() → close_document()
+            - "Создай сферу и цилиндр" → open_document("shapes.FCStd") → create_sphere(size=15) → create_cylinder(size=10) → save_document() → close_document()
+
+            ПРИМЕЧАНИЯ:
+            - Размеры указываются в миллиметрах
+            - Если не указан файл, создавай auto_фигура.FCStd
+            - Всегда информируй пользователя о прогрессе"""),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
             MessagesPlaceholder(variable_name="agent_scratchpad")
@@ -331,6 +373,57 @@ class FullCADAgent:
         self.memory.clear()
         logger.info("🧹 Память агента очищена")
 
+    def get_stats(self) -> Dict[str, Any]:
+        """Получить статистику агента."""
+        return {
+            "model": MODEL,
+            "tools_count": len(self.tools),
+            "memory_messages": len(self.memory.chat_memory.messages) if self.memory.chat_memory else 0,
+            "api_key_set": bool(os.getenv("API_KEY")),
+            "api_url": "https://foundation-models.api.cloud.ru/v1"
+        }
+    
+    def check_health_direct(self) -> Dict[str, Any]:
+        """Прямая проверка здоровья системы (без использования агента)."""
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                results = {}
+                try:
+                    resp = client.get("http://localhost:8001/")
+                    results["fastapi_server"] = resp.status_code == 200
+                except:
+                    results["fastapi_server"] = False
+                try:
+                    resp = client.get("http://localhost:8001/api/mcp/status")
+                    results["mcp_server"] = resp.status_code == 200
+                except:
+                    results["mcp_server"] = False
+                try:
+                    resp = client.get("http://localhost:8001/api/cad/documents")
+                    results["cad_system"] = resp.status_code == 200
+                except:
+                    results["cad_system"] = False
+                
+                try:
+                    test_message = [{"role": "user", "content": "Привет"}]
+                    response = self.llm.invoke(test_message)
+                    results["llm"] = response.content is not None
+                except:
+                    results["llm"] = False
+                
+                results["agent"] = True
+                results["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                
+                return results
+                
+        except Exception as e:
+            logger.error(f"Ошибка прямой проверки здоровья: {str(e)}")
+            return {
+                "error": str(e),
+                "agent": True,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            }
+
 # ============ SINGLETON ДЛЯ ПРОЕКТА ============
 _agent_instance = None
 
@@ -340,6 +433,163 @@ def get_agent() -> FullCADAgent:
     if _agent_instance is None:
         _agent_instance = FullCADAgent()
     return _agent_instance
+
+def create_agent_router():
+    """Создать FastAPI роутер для агента"""
+    try:
+        from fastapi import APIRouter, HTTPException
+        
+        router = APIRouter(prefix="/api/agent", tags=["agent"])
+        
+        @router.post("/query")
+        async def agent_query(query_request: dict):
+            """Обработка запроса через AI агента"""
+            try:
+                query = query_request.get("query", "").strip()
+                
+                if not query:
+                    raise HTTPException(status_code=400, detail="Запрос не может быть пустым")
+                
+                agent = get_agent()
+                result = agent.process(query)
+                
+                return result
+                
+            except Exception as e:
+                logger.error(f"Ошибка обработки запроса: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Ошибка обработки запроса: {str(e)}")
+        
+        @router.get("/status")
+        async def agent_status():
+            """Получить статус агента"""
+            try:
+                agent = get_agent()
+                return {
+                    "status": "running",
+                    "model": MODEL,
+                    "tools_count": len(agent.tools),
+                    "memory_messages": len(agent.memory.chat_memory.messages) if agent.memory.chat_memory else 0,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+            except Exception as e:
+                logger.error(f"Ошибка получения статуса: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Ошибка получения статуса: {str(e)}")
+        
+        @router.post("/clear")
+        async def clear_agent_memory():
+            """Очистить память агента"""
+            try:
+                agent = get_agent()
+                agent.clear_memory()
+                return {"success": True, "message": "Память агента очищена"}
+            except Exception as e:
+                logger.error(f"Ошибка очистки памяти: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Ошибка очистки памяти: {str(e)}")
+        
+        @router.get("/health")
+        async def agent_health():
+            """Проверить здоровье агента"""
+            try:
+                agent = get_agent()
+                
+                # Прямая проверка здоровья без использования инструментов
+                import httpx
+                
+                results = {}
+                
+                # 1. Проверяем FastAPI сервер
+                try:
+                    with httpx.Client(timeout=5.0) as client:
+                        resp = client.get("http://localhost:8001/")
+                        results["fastapi_server"] = resp.status_code == 200
+                except:
+                    results["fastapi_server"] = False
+                
+                # 2. Проверяем MCP статус через FastAPI
+                try:
+                    with httpx.Client(timeout=5.0) as client:
+                        resp = client.get("http://localhost:8001/api/mcp/status")
+                        results["mcp_server"] = resp.status_code == 200
+                except:
+                    results["mcp_server"] = False
+                
+                # 3. Проверяем CAD систему через FastAPI
+                try:
+                    with httpx.Client(timeout=5.0) as client:
+                        resp = client.get("http://localhost:8001/api/cad/documents")
+                        results["cad_system"] = resp.status_code == 200
+                except:
+                    results["cad_system"] = False
+                
+                # 4. Проверяем LLM подключение
+                try:
+                    # Простой запрос к LLM
+                    test_message = [{"role": "user", "content": "Привет"}]
+                    response = agent.llm.invoke(test_message)
+                    results["llm"] = response.content is not None
+                except:
+                    results["llm"] = False
+                
+                results["agent"] = True
+                results["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                
+                return results
+                
+            except Exception as e:
+                logger.error(f"Ошибка проверки здоровья: {str(e)}")
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Ошибка проверки здоровья: {str(e)}"
+                )
+        
+        @router.get("/tools")
+        async def agent_tools():
+            """Получить список доступных инструментов агента."""
+            try:
+                agent = get_agent()
+                tools_info = []
+                for tool in agent.tools:
+                    tools_info.append({
+                        "name": tool.name,
+                        "description": tool.description,
+                        "args": str(tool.args)
+                    })
+                return {
+                    "tools_count": len(agent.tools),
+                    "tools": tools_info
+                }
+            except Exception as e:
+                logger.error(f"Ошибка получения инструментов: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Ошибка получения инструментов: {str(e)}")
+        
+        @router.get("/help")
+        async def agent_help():
+            """Получить справку по использованию агента."""
+            return {
+                "message": "AI Agent для CAD системы",
+                "endpoints": {
+                    "query": "POST /api/agent/query - Отправить запрос агенту",
+                    "status": "GET /api/agent/status - Статус агента",
+                    "clear": "POST /api/agent/clear - Очистить память",
+                    "health": "GET /api/agent/health - Проверить здоровье",
+                    "tools": "GET /api/agent/tools - Список инструментов",
+                    "help": "GET /api/agent/help - Справка"
+                },
+                "example_query": {
+                    "method": "POST",
+                    "url": "http://localhost:8001/api/agent/query",
+                    "body": {"query": "Создай куб размером 20мм"},
+                    "headers": {"Content-Type": "application/json"}
+                }
+            }
+        
+        return router
+        
+    except Exception as e:
+        logger.error(f"Ошибка создания роутера агента: {str(e)}")
+        # В случае ошибки возвращаем пустой роутер
+        from fastapi import APIRouter
+        return APIRouter()
 
 # ============ ТЕСТОВЫЙ СКРИПТ ============
 if __name__ == "__main__":
