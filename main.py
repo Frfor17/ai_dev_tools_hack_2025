@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Импорт всех инструментов для регистрации
 from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape,tool_test_shape
 from tools.tool_create_assembly import create_assemble
+from tools.tool_add_part_to_assembly import add_part_to_assembly
 
 
 app = FastAPI(title="CAD API Gateway")
@@ -139,6 +140,72 @@ async def create_assembly(
             status_code=500,
             detail=f"Ошибка при создании сборки: {str(e)}"
         )
+
+
+@app.post("/api/cad/add-part-to-assembly")
+async def add_part_to_assembly_endpoint(
+    assembly_name: str = Query(..., description="Имя сборки"),
+    part_name: str = Query(None, description="Имя детали (если None, будет создана новая)"),
+    part_type: str = Query("Box", description="Тип создаваемой детали: Box, Cylinder, Sphere")
+):
+    """
+    Добавить деталь в сборку Assembly4.
+    
+    Parameters:
+    - assembly_name: Имя сборки (объекта App::Part с Type="Assembly")
+    - part_name: Имя детали (если None, будет создана новая)
+    - part_type: Тип создаваемой детали (если деталь создаётся)
+    """
+    logger.info(f"POST /api/cad/add-part-to-assembly called with assembly_name={assembly_name}, part_name={part_name}, part_type={part_type}")
+                
+    try:
+        if not core.freecad:
+            result = core.connect()
+            if not result["success"]:
+                logger.error(f"Failed to connect to FreeCAD: {result.get('error', 'Unknown error')}")
+                return f"Ошибка подключения к FreeCAD: {result.get('error', 'Неизвестная ошибка')}"
+            
+        # Сборка создаётся как файл assembly_name.FCStd
+        file_path = f"{assembly_name}.FCStd"
+        open_result = await core.open_document(file_path)
+        logger.info(f"Opening document: {open_result}")
+        
+        # Добавим логирование для диагностики
+        if core.current_doc:
+            logger.info(f"Document opened successfully: {core.current_doc.Name}")
+            logger.info(f"Objects in document: {[obj.Name for obj in core.current_doc.Objects]}")
+        else:
+            logger.error("Failed to open document - current_doc is None")
+
+        # Вызываем функцию
+        result = await asyncio.to_thread(
+            add_part_to_assembly, 
+            core, 
+            assembly_name=assembly_name, 
+            part_name=part_name, 
+            part_type=part_type)
+        logger.info(f"add_part_to_assembly result: {result}")
+
+        if result.get("success", False):
+            return {
+                "status": "success",
+                "message": result.get("message", "Деталь добавлена в сборку"),
+                "assembly": result.get("assembly"),
+                "part": result.get("part")
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("message", "Неизвестная ошибка при добавлении детали")
+            )
+
+    except Exception as e:
+        logger.error(f"Error in add_part_to_assembly: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при добавлении детали: {str(e)}"
+        )
+
 
 
 @app.get("/")

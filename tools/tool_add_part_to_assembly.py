@@ -1,5 +1,3 @@
-import FreeCAD as App
-import FreeCADGui as Gui
 from common_logic import FreeCADCore
 from mcp_instance import mcp
 import logging
@@ -32,16 +30,42 @@ def add_part_to_assembly(core, assembly_name, part_name=None, part_type="Box"):
                     "assembly": None,
                     "part": None
                 }
-
-        # 1. Находим объект сборки
-        assembly = doc.getObject(assembly_name)
-        if not assembly:
+            
+        doc = core.current_doc
+        if not doc:
             return {
                 "success": False,
-                "message": f"Сборка с именем '{assembly_name}' не найдена.",
+                "message": "Нет активного документа. Сначала создайте сборку.",
                 "assembly": None,
                 "part": None
             }
+
+        # 1. Находим объект сборки
+        logger.info(f"Looking for assembly object with name: '{assembly_name}'")
+        
+        # Сначала получим все объекты в документе для диагностики
+        all_objects = [obj.Name for obj in doc.Objects]
+        logger.info(f"All objects in document: {all_objects}")
+        
+        assembly = doc.getObject(assembly_name)
+        if not assembly:
+            logger.error(f"Assembly object '{assembly_name}' not found in document")
+            
+            # Попробуем найти объект Assembly (по умолчанию создается с именем "Assembly")
+            assembly_by_default = doc.getObject("Assembly")
+            if assembly_by_default:
+                logger.info(f"Found default assembly object: '{assembly_by_default.Name}' (Type: {assembly_by_default.TypeId})")
+                logger.info(f"Assembly Label: {assembly_by_default.Label}")
+                logger.info(f"Using default assembly object instead")
+                assembly = assembly_by_default
+            else:
+                logger.error("No default 'Assembly' object found either")
+                return {
+                    "success": False,
+                    "message": f"Сборка с именем '{assembly_name}' не найдена. Доступные объекты: {all_objects}",
+                    "assembly": None,
+                    "part": None
+                }
 
         # 2. Ищем или создаём деталь
         if part_name and doc.getObject(part_name):
@@ -79,12 +103,10 @@ def add_part_to_assembly(core, assembly_name, part_name=None, part_type="Box"):
         
         # 4. Обновляем документ и выделяем деталь для наглядности
         doc.recompute()
-        Gui.Selection.clearSelection()
-        Gui.Selection.addSelection(part)
 
         return {
             "success": True,
-            "message": f"{msg_part} добавлена в сборку '{assembly_name}'.",
+            "message": f"{msg_part} добавлена в сборку '{assembly_name}' (объект: {assembly.Name}).",
             "assembly": assembly.Name,
             "part": part.Name
         }
@@ -98,3 +120,28 @@ def add_part_to_assembly(core, assembly_name, part_name=None, part_type="Box"):
             "assembly": None,
             "part": None
         }
+    
+@mcp.tool()
+def add_part_to_assembly_tool(assembly_name: str, part_name: str = None, part_type: str = "Box"):
+    """MCP-инструмент для добавления детали в сборку."""
+    logger.info(f"add_part_to_assembly_tool called with assembly_name={assembly_name}, part_name={part_name}, part_type={part_type}")
+
+    try:
+        core = FreeCADCore()
+        connect_result = core.connect()
+
+        if not connect_result["success"]:
+            logger.error(f"Failed to connect to FreeCAD: {connect_result.get('error', 'Unknown error')}")
+            return f"Ошибка подключения к FreeCAD: {connect_result.get('error', 'Неизвестная ошибка')}"
+        
+        logger.info("FreeCAD connected successfully")
+
+        # теперь вызываем add_part_to_assembly
+        result = add_part_to_assembly(core, assembly_name, part_name, part_type)
+        logger.info(f"add_part_to_assembly result: {result}")
+
+        return result.get("message", str(result))
+    
+    except Exception as e:
+        logger.error(f"Exception in add_part_to_assembly_tool: {str(e)}", exc_info=True)
+        return f"Ошибка при добавлении детали: {str(e)}"
