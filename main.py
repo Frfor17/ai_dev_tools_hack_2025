@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape,tool_test_shape
 from tools.tool_create_assembly import create_assemble
 from tools.tool_add_part_to_assembly import add_part_to_assembly
+from tools.tool_get_geometric_elements import get_geometric_elements
 
 
 app = FastAPI(title="CAD API Gateway")
@@ -33,7 +34,7 @@ async def get_mcp_status():
     logger.info("GET /api/mcp/status called")
     return {
         "status": "running",
-        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document", "create_complex_shape","tool_test_shape"],
+        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document", "create_complex_shape", "tool_test_shape", "get_geometric_elements"],
         "description": "CAD MCP Server for FreeCAD operations"
     }
 
@@ -205,8 +206,60 @@ async def add_part_to_assembly_endpoint(
             status_code=500,
             detail=f"Ошибка при добавлении детали: {str(e)}"
         )
-
-
+    
+@app.get("/api/cad/get-geometric-elements")
+async def get_geometric_elements_endpoint(part_name: str = Query(..., description="Имя детали")):
+    """
+    Получить геометрические элементы детали (грани, рёбра, вершины).
+    
+    Parameters:
+    - part_name: Имя детали в активном документе
+    """
+    logger.info(f"GET /api/cad/get-geometric-elements called with part_name={part_name}")
+    
+    try:
+        # Проверяем подключение к FreeCAD
+        if not core.freecad:
+            result = core.connect()
+            if not result["success"]:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Ошибка подключения к FreeCAD: {result.get('error', 'Неизвестная ошибка')}"
+                )
+        
+        # Проверяем наличие открытого документа
+        if not core.current_doc:
+            raise HTTPException(
+                status_code=400,
+                detail="Нет открытого документа. Сначала откройте документ с помощью /api/cad/open-document"
+            )
+        
+        # Вызываем функцию из tool_get_geometric_elements
+        result = await asyncio.to_thread(get_geometric_elements, core, part_name)
+        
+        if result.get("success", False):
+            return {
+                "status": "success",
+                "message": result.get("message", "Геометрия детали получена"),
+                "part": result.get("part"),
+                "faces": result.get("faces", []),
+                "edges": result.get("edges", []),
+                "vertices": result.get("vertices", [])
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("message", "Неизвестная ошибка при получении геометрии детали")
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_geometric_elements_endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при получении геометрии детали: {str(e)}"
+        )
 
 @app.get("/")
 async def root():
@@ -218,7 +271,8 @@ async def root():
             "create_shape": "/api/cad/create-shape?shape_type=cube&size=10",
             "create_cube_15mm": "/api/cad/create-shape?shape_type=cube&size=15",
             "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
-            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10"
+            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10",
+            "get_geometric_elements": "/api/cad/get-geometric-elements?part_name=PartName"
         },
         "notes": "Размер указывается в миллиметрах"
     }
@@ -400,6 +454,7 @@ async def root():
             "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
             "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10",
             "create_complex_shape": "/api/cad/create-complex-shape?shape_type=star&num_points=5&inner_radius=10&outer_radius=20&height=5",
+            "get_geometric_elements": "/api/cad/get-geometric-elements?part_name=PartName",
             "open_document": "/api/cad/open-document?file_path=test.FCStd",
             "save_document": "/api/cad/save-document?file_path=test.FCStd",
             "close_document": "/api/cad/close-document",
@@ -532,6 +587,7 @@ if __name__ == "__main__":
     print("Создать тестовый куб: http://localhost:8001/api/cad/create-test-shape?shape_type=cube&size=15")
     print("Создать тестовую сферу: http://localhost:8001/api/cad/create-test-shape?shape_type=sphere&size=20&x=10&y=10&z=10")
     print("Создать тестовый цилиндр: http://localhost:8001/api/cad/create-test-shape?shape_type=cylinder&size=10&size=25&file_name=my_cylinder.FCStd")
+    print("Получить геометрию детали: http://localhost:8001/api/cad/get-geometric-elements?part_name=PartName")
     print("Статус MCP: http://localhost:8001/api/mcp/status")
     print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8001)

@@ -1,23 +1,12 @@
-import FreeCAD as App
+from common_logic import FreeCADCore
+from mcp_instance import mcp
+import logging
 
-@mcp.tool()
-def get_geometric_elements_tool(part_name: str):
-    """MCP-инструмент для получения списка геометрических элементов детали."""
-    result = get_geometric_elements(part_name)
-    return {
-        "status": "success" if result["success"] else "error",
-        "detail": result["message"],
-        "data": {
-            "part": result["part"],
-            "faces": result["faces"],
-            "edges": result["edges"],
-            "vertices": result["vertices"]
-        }
-    }
+logger = logging.getLogger(__name__)
 
 
 
-def get_geometric_elements(part_name):
+def get_geometric_elements(core, part_name):
     """
     Возвращает список всех геометрических элементов (грани, рёбра, вершины) указанной детали.
     
@@ -28,18 +17,30 @@ def get_geometric_elements(part_name):
         dict: Результат с полями 'success', 'message', 'part', и списками 'faces', 'edges', 'vertices'.
     """
     try:
-        doc = App.ActiveDocument
-        if not doc:
-            return {
-                "success": False,
-                "message": "Нет активного документа.",
-                "part": part_name,
-                "faces": [],
-                "edges": [],
-                "vertices": []
-            }
-
-        # 1. Находим деталь
+        if not core.freecad:
+            result = core.connect()
+            if not result["success"]:
+                return {
+                    "success": False,
+                    "message": f"Ошибка подключения: {result.get('error')}",
+                    "part": part_name,
+                    "faces": [],
+                    "edges": [],
+                    "vertices": []
+                }
+                
+                
+            doc = core.current_doc
+            if not doc:
+                return {
+                    "success": False,
+                    "message": f"Ошибка подключения: {result.get('error')}",
+                    "part": part_name,
+                    "faces": [],
+                    "edges": [],
+                    "vertices": []
+                }
+        
         part = doc.getObject(part_name)
         if not part:
             return {
@@ -90,3 +91,22 @@ def get_geometric_elements(part_name):
             "edges": [],
             "vertices": []
         }
+    
+
+
+@mcp.tool()
+def get_geometric_elements_tool(part_name: str):
+    """MCP-инструмент для получения списка геометрических элементов детали."""
+    core = FreeCADCore()
+    connect_result = core.connect()
+    if not connect_result["success"]:
+        return {
+            "success": False,
+            "message": f"Ошибка подключения: {connect_result.get('error')}",
+            "part": part_name,
+            "faces": [],
+            "edges": [],
+            "vertices": []
+        }
+    result = get_geometric_elements(core, part_name)
+    return result
