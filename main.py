@@ -1,4 +1,7 @@
-from fastapi import FastAPI, HTTPException
+import logging
+import sys
+import os
+from fastapi import FastAPI, HTTPException, Query
 import uvicorn
 from common_logic import core
 import asyncio
@@ -6,24 +9,41 @@ from mcp_instance import mcp
 import threading
 import math
 
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,  # Меняем на INFO, чтобы не засорять логи
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
 # Импорт всех инструментов для регистрации
 from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape,tool_test_shape
+from tools.tool_create_assembly import create_assemble
+from tools.tool_add_part_to_assembly import add_part_to_assembly
+from tools.tool_get_geometric_elements import get_geometric_elements
+
 
 app = FastAPI(title="CAD API Gateway")
 
 @app.get("/api/mcp/status")
 async def get_mcp_status():
     """Получить статус MCP сервера."""
+    logger.info("GET /api/mcp/status called")
     return {
         "status": "running",
-        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document", "create_complex_shape","tool_test_shape"],
+        "tools": ["get_mcp_status", "get_documents", "create_shape", "create_cube", "create_sphere", "create_cylinder", "open_document", "save_document", "close_document", "create_complex_shape", "tool_test_shape", "get_geometric_elements"],
         "description": "CAD MCP Server for FreeCAD operations"
     }
 
 @app.get("/api/cad/documents")
 async def get_documents():
     """Получить документы из FreeCAD."""
+    logger.info("GET /api/cad/documents called")
     result = await core.get_onshape_documents()
+    logger.info(f"GET /api/cad/documents result: {result}")
     return {"result": result}
 
 @app.get("/api/cad/create-shape")
@@ -42,15 +62,19 @@ async def create_shape(
     - size: Размер фигуры в мм
     - x, y, z: Координаты центра фигуры (в мм)
     """
+    logger.info(f"GET /api/cad/create-shape called with shape_type={shape_type}, size={size}")
+    
     # Валидация параметров
     if size <= 0:
+        logger.warning(f"Invalid size: {size}")
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="Размер должен быть положительным числом"
         )
     
     valid_shapes = ["cube", "sphere", "cylinder"]
     if shape_type.lower() not in valid_shapes:
+        logger.warning(f"Invalid shape_type: {shape_type}")
         raise HTTPException(
             status_code=400,
             detail=f"Неподдерживаемый тип фигуры. Доступно: {', '.join(valid_shapes)}"
@@ -76,8 +100,170 @@ async def create_shape(
         }
     }
 
+# НОВЫЙ ЭНДПОИНТ ДЛЯ СОЗДАНИЯ СБОРКИ
+@app.post("/api/cad/create-assembly")
+async def create_assembly(
+    assembly_name: str = Query(..., description="Имя сборки"),
+    create_default_parts: bool = Query(True, description="Создать стандартные детали автоматически")
+):
+    """
+    Создать новую сборку Assembly4 в FreeCAD.
+    
+    Parameters:
+    - assembly_name: Уникальное имя для сборки
+    - create_default_parts: Автоматически создать базовые детали (куб, цилиндр, сфера)
+    """
+    logger.info(f"POST /api/cad/create-assembly called with assembly_name={assembly_name}, create_default_parts={create_default_parts}")
+    
+    try:
+        # Используем синхронный вызов, так как FreeCAD API обычно синхронный
+        logger.info(f"Calling core.create_assemble({assembly_name}, {create_default_parts})")
+        result = await asyncio.to_thread(create_assemble, core, assembly_name, create_default_parts)
+        logger.info(f"core.create_assemble result: {result}")
+        
+        if result.get("success", False):
+            return {
+                "status": "success",
+                "message": result.get("message", "Сборка создана успешно"),
+                "assembly_name": result.get("assembly_name", assembly_name),
+                "parts": result.get("parts", []),
+                "document": result.get("document_name")
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("message", "Неизвестная ошибка при создании сборки")
+            )
+            
+    except Exception as e:
+        logger.error(f"Error in create_assembly: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при создании сборки: {str(e)}"
+        )
+
+
+@app.post("/api/cad/add-part-to-assembly")
+async def add_part_to_assembly_endpoint(
+    assembly_name: str = Query(..., description="Имя сборки"),
+    part_name: str = Query(None, description="Имя детали (если None, будет создана новая)"),
+    part_type: str = Query("Box", description="Тип создаваемой детали: Box, Cylinder, Sphere")
+):
+    """
+    Добавить деталь в сборку Assembly4.
+    
+    Parameters:
+    - assembly_name: Имя сборки (объекта App::Part с Type="Assembly")
+    - part_name: Имя детали (если None, будет создана новая)
+    - part_type: Тип создаваемой детали (если деталь создаётся)
+    """
+    logger.info(f"POST /api/cad/add-part-to-assembly called with assembly_name={assembly_name}, part_name={part_name}, part_type={part_type}")
+                
+    try:
+        if not core.freecad:
+            result = core.connect()
+            if not result["success"]:
+                logger.error(f"Failed to connect to FreeCAD: {result.get('error', 'Unknown error')}")
+                return f"Ошибка подключения к FreeCAD: {result.get('error', 'Неизвестная ошибка')}"
+            
+        # Сборка создаётся как файл assembly_name.FCStd
+        file_path = f"{assembly_name}.FCStd"
+        open_result = await core.open_document(file_path)
+        logger.info(f"Opening document: {open_result}")
+        
+        # Добавим логирование для диагностики
+        if core.current_doc:
+            logger.info(f"Document opened successfully: {core.current_doc.Name}")
+            logger.info(f"Objects in document: {[obj.Name for obj in core.current_doc.Objects]}")
+        else:
+            logger.error("Failed to open document - current_doc is None")
+
+        # Вызываем функцию
+        result = await asyncio.to_thread(
+            add_part_to_assembly, 
+            core, 
+            assembly_name=assembly_name, 
+            part_name=part_name, 
+            part_type=part_type)
+        logger.info(f"add_part_to_assembly result: {result}")
+
+        if result.get("success", False):
+            return {
+                "status": "success",
+                "message": result.get("message", "Деталь добавлена в сборку"),
+                "assembly": result.get("assembly"),
+                "part": result.get("part")
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("message", "Неизвестная ошибка при добавлении детали")
+            )
+
+    except Exception as e:
+        logger.error(f"Error in add_part_to_assembly: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при добавлении детали: {str(e)}"
+        )
+    
+@app.get("/api/cad/get-geometric-elements")
+async def get_geometric_elements_endpoint(part_name: str = Query(..., description="Имя детали")):
+    """
+    Получить геометрические элементы детали (грани, рёбра, вершины).
+    
+    Parameters:
+    - part_name: Имя детали в активном документе
+    """
+    logger.info(f"GET /api/cad/get-geometric-elements called with part_name={part_name}")
+    
+    try:
+        # Проверяем подключение к FreeCAD
+        if not core.freecad:
+            result = core.connect()
+            if not result["success"]:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Ошибка подключения к FreeCAD: {result.get('error', 'Неизвестная ошибка')}"
+                )
+        
+        # Проверяем наличие открытого документа
+        if not core.current_doc:
+            raise HTTPException(
+                status_code=400,
+                detail="Нет открытого документа. Сначала откройте документ с помощью /api/cad/open-document"
+            )
+        
+        # Вызываем функцию из tool_get_geometric_elements
+        result = await asyncio.to_thread(get_geometric_elements, core, part_name)
+        
+        if result.get("success", False):
+            return {
+                "status": "success",
+                "message": result.get("message", "Геометрия детали получена"),
+                "part": result.get("part"),
+                "faces": result.get("faces", []),
+                "edges": result.get("edges", []),
+                "vertices": result.get("vertices", [])
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("message", "Неизвестная ошибка при получении геометрии детали")
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_geometric_elements_endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при получении геометрии детали: {str(e)}"
+        )
+
 @app.get("/")
 async def root():
+    logger.info("GET / called")
     return {
         "message": "FreeCAD API Gateway",
         "endpoints": {
@@ -85,7 +271,8 @@ async def root():
             "create_shape": "/api/cad/create-shape?shape_type=cube&size=10",
             "create_cube_15mm": "/api/cad/create-shape?shape_type=cube&size=15",
             "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
-            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10"
+            "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10",
+            "get_geometric_elements": "/api/cad/get-geometric-elements?part_name=PartName"
         },
         "notes": "Размер указывается в миллиметрах"
     }
@@ -267,6 +454,7 @@ async def root():
             "create_sphere": "/api/cad/create-shape?shape_type=sphere&size=20",
             "create_cylinder": "/api/cad/create-shape?shape_type=cylinder&size=10",
             "create_complex_shape": "/api/cad/create-complex-shape?shape_type=star&num_points=5&inner_radius=10&outer_radius=20&height=5",
+            "get_geometric_elements": "/api/cad/get-geometric-elements?part_name=PartName",
             "open_document": "/api/cad/open-document?file_path=test.FCStd",
             "save_document": "/api/cad/save-document?file_path=test.FCStd",
             "close_document": "/api/cad/close-document",
@@ -377,9 +565,13 @@ async def create_test_shape_endpoint(
         )
 
 if __name__ == "__main__":
+    logger.info("Starting FreeCAD FastAPI Server...")
+    
     # Запуск MCP сервера в отдельном потоке
-    mcp_thread = threading.Thread(target=lambda: mcp.run(transport="streamable-http", host="0.0.0.0", port=8000), daemon=True)
+    logger.info("Starting MCP server on port 9000...")
+    mcp_thread = threading.Thread(target=lambda: mcp.run(transport="streamable-http", host="0.0.0.0", port=9000), daemon=True)
     mcp_thread.start()
+    logger.info("MCP server thread started")
 
     print("=" * 60)
     print("FreeCAD FastAPI Server запущен")
@@ -395,6 +587,7 @@ if __name__ == "__main__":
     print("Создать тестовый куб: http://localhost:8001/api/cad/create-test-shape?shape_type=cube&size=15")
     print("Создать тестовую сферу: http://localhost:8001/api/cad/create-test-shape?shape_type=sphere&size=20&x=10&y=10&z=10")
     print("Создать тестовый цилиндр: http://localhost:8001/api/cad/create-test-shape?shape_type=cylinder&size=10&size=25&file_name=my_cylinder.FCStd")
+    print("Получить геометрию детали: http://localhost:8001/api/cad/get-geometric-elements?part_name=PartName")
     print("Статус MCP: http://localhost:8001/api/mcp/status")
     print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8001)
