@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 import uvicorn
 from common_logic import core
 import asyncio
@@ -8,6 +9,13 @@ import math
 
 # Импорт всех инструментов для регистрации
 from tools import tool_create_cube, tool_create_cylinder, tool_create_shapes, tool_create_sphere, tool_documents, tool_status, tool_open_document, tool_save_document, tool_close_document, tool_create_complex_shape,tool_test_shape
+
+# Импорт функции генерации спеки из ai_agent.py
+from ai_agent import generate_spec_with_agent
+
+# Pydantic модель для ввода
+class GenerateSpecRequest(BaseModel):
+    prompt: str
 
 app = FastAPI(title="CAD API Gateway")
 
@@ -274,6 +282,7 @@ async def root():
             "create_test_cube": "/api/cad/create-test-shape?shape_type=cube&size=15",
             "create_test_sphere": "/api/cad/create-test-shape?shape_type=sphere&size=20",
             "create_test_cylinder": "/api/cad/create-test-shape?shape_type=cylinder&size=10&size=30",
+            "generate_robot_spec": "POST /api/ai/generate-spec"
         },
         "notes": "Размер указывается в миллиметрах. Для test_shape можно указать имя файла или оно будет сгенерировано автоматически"
     }
@@ -294,6 +303,42 @@ async def save_document(file_path: str = None):
 async def close_document():
     result = await core.close_document()
     return {"result": result}
+
+@app.post("/api/ai/generate-spec")
+async def generate_robot_spec(request: GenerateSpecRequest):
+    """
+    Сгенерировать JSON-спецификацию робота по текстовому описанию.
+    
+    Пример запроса:
+    {
+        "prompt": "Создай спецификацию для четырёхколёсного робота-исследователя с размерами шасси 120x80x40 мм и колёсами диаметром 60 мм."
+    }
+    
+    Возвращает:
+    {
+        "success": true,
+        "specification": {
+            "robot_type": "wheeled",
+            "components": [...],
+            "assembly_rules": [...]
+        },
+        "message": null
+    }
+    """
+    if not request.prompt or not request.prompt.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Поле 'prompt' обязательно для заполнения"
+        )
+    
+    try:
+        result = await generate_spec_with_agent(request.prompt.strip())
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при генерации спецификации: {str(e)}"
+        )
 
 @app.get("/api/cad/create-test-shape")
 async def create_test_shape_endpoint(
@@ -396,5 +441,6 @@ if __name__ == "__main__":
     print("Создать тестовую сферу: http://localhost:8001/api/cad/create-test-shape?shape_type=sphere&size=20&x=10&y=10&z=10")
     print("Создать тестовый цилиндр: http://localhost:8001/api/cad/create-test-shape?shape_type=cylinder&size=10&size=25&file_name=my_cylinder.FCStd")
     print("Статус MCP: http://localhost:8001/api/mcp/status")
+    print("Генерация JSON-спеки: http://localhost:8001/api/ai/generate-spec (POST)")
     print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8001)
